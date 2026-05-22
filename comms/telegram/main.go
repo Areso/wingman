@@ -168,24 +168,24 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 
 // sendMainMenu sends the main menu with plugin options
 func (b *Bot) sendMainMenu(chatID int64) {
-	var rows [][]tgbotapi.KeyboardButton
-	var pluginButtons []tgbotapi.KeyboardButton
+	var rows [][]tgbotapi.InlineKeyboardButton
+	var pluginButtons []tgbotapi.InlineKeyboardButton
 
 	// Create buttons for each plugin
 	for _, plugin := range b.plugins {
-		pluginButtons = append(pluginButtons, tgbotapi.NewKeyboardButton(plugin.Name))
+		// Use plugin ID as callback data and name as button text
+		pluginButtons = append(pluginButtons, tgbotapi.NewInlineKeyboardButtonData(plugin.Name, plugin.ID))
 	}
 
 	// Create 2-column grid for buttons
 	for i, button := range pluginButtons {
 		if i%2 == 0 {
-			rows = append(rows, []tgbotapi.KeyboardButton{})
+			rows = append(rows, []tgbotapi.InlineKeyboardButton{})
 		}
 		rows[len(rows)-1] = append(rows[len(rows)-1], button)
 	}
 
-	keyboard := tgbotapi.NewReplyKeyboard(rows...)
-	keyboard.OneTimeKeyboard = false
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
 
 	msg := tgbotapi.NewMessage(chatID, "Select a plugin to run:")
 	msg.ReplyMarkup = keyboard
@@ -211,7 +211,7 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	ack := tgbotapi.NewCallback(callback.ID, "Processing...")
 	b.api.Send(ack)
 
-	// Extract plugin ID from callback data
+	// Extract plugin ID from callback data (this should be the plugin ID)
 	pluginID := callback.Data
 
 	// Check if plugin exists
