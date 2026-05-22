@@ -76,10 +76,10 @@ func initDB(path string) (*sql.DB, error) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS tasks_queued (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			created_at DATETIME NOT NULL,
-			invoked_at DATETIME,
+			created_at INTEGER NOT NULL,
+			invoked_at INTEGER,
 			plugin_id TEXT NOT NULL,
-			finished_at DATETIME
+			finished_at INTEGER
 		)
 	`)
 	if err != nil {
@@ -89,11 +89,11 @@ func initDB(path string) (*sql.DB, error) {
 }
 
 func invoke(db *sql.DB, p Plugin) {
-	now := time.Now().UTC()
+	now := time.Now().UTC().Unix()
 
 	res, err := db.Exec(
 		"INSERT INTO tasks_queued (created_at, plugin_id) VALUES (?, ?)",
-		now.Format(time.RFC3339), p.ID,
+		now, p.ID,
 	)
 	if err != nil {
 		log.Printf("error inserting task for %s: %v", p.ID, err)
@@ -101,7 +101,7 @@ func invoke(db *sql.DB, p Plugin) {
 	}
 	id, _ := res.LastInsertId()
 
-	_, err = db.Exec("UPDATE tasks_queued SET invoked_at = ? WHERE id = ?", now.Format(time.RFC3339), id)
+	_, err = db.Exec("UPDATE tasks_queued SET invoked_at = ? WHERE id = ?", now, id)
 	if err != nil {
 		log.Printf("error updating invoked_at for task %d: %v", id, err)
 	}
@@ -114,8 +114,8 @@ func invoke(db *sql.DB, p Plugin) {
 
 	runErr := cmd.Run()
 
-	finishTime := time.Now().UTC()
-	_, err = db.Exec("UPDATE tasks_queued SET finished_at = ? WHERE id = ?", finishTime.Format(time.RFC3339), id)
+	finishTime := time.Now().UTC().Unix()
+	_, err = db.Exec("UPDATE tasks_queued SET finished_at = ? WHERE id = ?", finishTime, id)
 	if err != nil {
 		log.Printf("error updating finished_at for task %d: %v", id, err)
 	}
