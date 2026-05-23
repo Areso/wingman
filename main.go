@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,6 +140,15 @@ func main() {
 	}
 
 	log.Printf("loaded %d plugin(s)", len(plugins))
+
+	// Set up HTTP endpoint for plugin invocation
+	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
+	go func() {
+		log.Printf("Starting HTTP server on :%d", b.port)
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
 
 	for range time.NewTicker(time.Minute).C {
 		now := time.Now()
