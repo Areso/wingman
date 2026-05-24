@@ -299,6 +299,16 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 	// For demonstration purposes, we just log the invocation
 	log.Printf("Plugin %s invoked with params: %v", req.ID, req.Params)
 	// Here you would actually invoke the plugin
+
+	// Make HTTP request to wingman to invoke the plugin
+	if err := b.invokePlugin(req.ID, req); err != nil {
+		log.Printf("Error invoking plugin %s: %v", req.ID, err)
+		//msg := tgbotapi.NewMessage(1, fmt.Sprintf("Plugin %s invoked with parameters: %v", plugin.Name, req.Params))
+		//msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
+		//b.api.Send(msg)
+		return
+	}
+
 	// For now, we'll simulate it with a message
 	msg := tgbotapi.NewMessage(1, fmt.Sprintf("Plugin %s invoked with parameters: %v", plugin.Name, req.Params))
 	b.api.Send(msg)
