@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/BurntSushi/toml"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // Plugin represents a loaded plugin
@@ -253,7 +253,6 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
-
 	// Send HTTP POST request to wingman
 	url := fmt.Sprintf("http://127.0.0.1:%d/invoke_plugin", b.port)
 	httpReq, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
@@ -261,19 +260,16 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("failed to send HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
 	}
-
 	return nil
 }
 
@@ -283,35 +279,29 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
-
 	var req PluginInvocationRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-
 	// Find plugin
 	plugin, exists := b.plugins[req.ID]
 	if !exists {
 		http.Error(w, "Plugin not found", http.StatusNotFound)
 		return
 	}
-
 	// For demonstration purposes, we just log the invocation
 	log.Printf("Plugin %s invoked with params: %v", req.ID, req.Params)
-
 	// Here you would actually invoke the plugin
 	// For now, we'll simulate it with a message
 	msg := tgbotapi.NewMessage(1, fmt.Sprintf("Plugin %s invoked with parameters: %v", plugin.Name, req.Params))
 	b.api.Send(msg)
-
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Plugin invoked successfully"))
 }
