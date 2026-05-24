@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-
+	"github.com/BurntSushi/toml"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -128,6 +128,17 @@ func invoke(db *sql.DB, p Plugin) {
 }
 
 func main() {
+	// Read config
+	var config struct {
+		Host string `toml:"host"`
+		Port int    `toml:"port"`
+	}
+	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
+		log.Printf("Failed to read config.toml, using defaults: %v", err)
+		config.Host = "127.0.0.1"
+		config.Port = 8089
+	}
+
 	db, err := initDB("wingman.db")
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)
@@ -141,11 +152,52 @@ func main() {
 
 	log.Printf("loaded %d plugin(s)", len(plugins))
 
-	// Set up HTTP endpoint for plugin invocation
-	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
+	// Set up HTTP endpoints
+	pluginsMap := make(map[string]Plugin)
+	for _, p := range plugins {
+		pluginsMap[p.ID] = p
+	}
+
+	http.HandleFunc("/queue_add_task", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			PluginID string `json:"plugin_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		p, ok := pluginsMap[req.PluginID]
+		if !ok {
+			http.Error(w, "Plugin not found", http.StatusNotFound)
+			return
+		}
+
+		now := time.Now().UTC().Unix()
+		res, err := db.Exec(
+			"INSERT INTO tasks_queued (created_at, plugin_id) VALUES (?, ?)",
+			now, p.ID,
+		)
+		if err != nil {
+			log.Printf("error inserting task for %s: %v", p.ID, err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		id, _ := res.LastInsertId()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int64{"id": id})
+	})
+
 	go func() {
-		log.Printf("Starting HTTP server on :%d", b.port)
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
+		addr := config.Host + ":" + fmt.Sprint(config.Port)
+		log.Printf("Starting HTTP server on %s", addr)
+		if err := http.ListenAndServe(addr, nil); err != nil {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()
