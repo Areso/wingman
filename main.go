@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/BurntSushi/toml"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/robfig/cron/v3"
 )
 
 type Plugin struct {
@@ -90,10 +90,9 @@ func initDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func invoke(db *sql.DB, p Plugin) {
+func create_task(db *sql.DB, p Plugin) {
 	now := time.Now().UTC().Unix()
-
-	res, err := db.Exec(
+	_, err := db.Exec( //res, err:
 		"INSERT INTO tasks_queued (created_at, plugin_id) VALUES (?, ?)",
 		now, p.ID,
 	)
@@ -101,29 +100,49 @@ func invoke(db *sql.DB, p Plugin) {
 		log.Printf("error inserting task for %s: %v", p.ID, err)
 		return
 	}
-	id, _ := res.LastInsertId()
+	// id, _ := res.LastInsertId()
+}
 
-	_, err = db.Exec("UPDATE tasks_queued SET invoked_at = ? WHERE id = ?", now, id)
-	if err != nil {
-		log.Printf("error updating invoked_at for task %d: %v", id, err)
-	}
-
-	cmd := exec.Command(p.InvocationWith, p.InvocationFile)
-	cmd.Dir = p.Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	log.Printf("invoking %s: %s %s", p.ID, p.InvocationWith, p.InvocationFile)
-
-	runErr := cmd.Run()
-
-	finishTime := time.Now().UTC().Unix()
-	_, err = db.Exec("UPDATE tasks_queued SET finished_at = ? WHERE id = ?", finishTime, id)
-	if err != nil {
-		log.Printf("error updating finished_at for task %d: %v", id, err)
-	}
-
-	if runErr != nil {
-		log.Printf("error running %s: %v", p.ID, runErr)
+func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
+	for range time.NewTicker(time.Second).C {
+		// Find queued tasks that haven't been invoked yet
+		var id int64
+		var pluginID string
+		err := db.QueryRow("SELECT id, plugin_id FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1").Scan(&id, &pluginID)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				log.Printf("error querying queued tasks: %v", err)
+			}
+			continue
+		}
+		// Get plugin
+		p, ok := plugins[pluginID]
+		if !ok {
+			log.Printf("plugin %s not found for queued task %d", pluginID, id)
+			continue
+		}
+		// Mark as invoked
+		now := time.Now().UTC().Unix()
+		_, err = db.Exec("UPDATE tasks_queued SET invoked_at = ? WHERE id = ?", now, id)
+		if err != nil {
+			log.Printf("error updating invoked_at for task %d: %v", id, err)
+			continue
+		}
+		// Execute plugin
+		cmd := exec.Command(p.InvocationWith, p.InvocationFile)
+		cmd.Dir = p.Dir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		log.Printf("invoking queued task %d (plugin %s): %s %s", id, p.ID, p.InvocationWith, p.InvocationFile)
+		runErr := cmd.Run()
+		finishTime := time.Now().UTC().Unix()
+		_, err = db.Exec("UPDATE tasks_queued SET finished_at = ? WHERE id = ?", finishTime, id)
+		if err != nil {
+			log.Printf("error updating finished_at for task %d: %v", id, err)
+		}
+		if runErr != nil {
+			log.Printf("error running queued task %d (plugin %s): %v", id, p.ID, runErr)
+		}
 	}
 }
 
@@ -152,11 +171,16 @@ func main() {
 
 	log.Printf("loaded %d plugin(s)", len(plugins))
 
-	// Set up HTTP endpoints
+	// Create plugins map for easy lookup
 	pluginsMap := make(map[string]Plugin)
 	for _, p := range plugins {
 		pluginsMap[p.ID] = p
 	}
+
+	// Start the queued task processor
+	go processQueuedTasks(db, pluginsMap)
+
+	// Set up HTTP endpoints
 
 	http.HandleFunc("/queue_add_task", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -209,7 +233,7 @@ func main() {
 				continue
 			}
 			if matchesCron(p.CroneTime, now) {
-				invoke(db, p)
+				create_task(db, p)
 			}
 		}
 	}

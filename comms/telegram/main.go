@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/BurntSushi/toml"
 )
 
 // Plugin represents a loaded plugin
@@ -316,6 +317,18 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Load config from file or use defaults
+	var config struct {
+		Host string `toml:"host"`
+		Port int    `toml:"port"`
+	}
+	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
+		log.Printf("Failed to read config.toml: %v", err)
+		log.Print("Using default host 127.0.0.1 and port 8089")
+		config.Host = "127.0.0.1"
+		config.Port = 8089
+	}
+
 	// Load bot token from systemd credential
 	log.Println("Loading bot token from systemd credentials...")
 	token, err := loadBotToken()
@@ -324,7 +337,7 @@ func main() {
 	}
 
 	// Create bot instance
-	bot, err := newBot(token, 8080)
+	bot, err := newBot(token, config.Port)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
