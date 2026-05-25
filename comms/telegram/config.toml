@@ -1,5 +1,5 @@
-host = "127.0.0.1"
-port = 8085
+comm_telegram_host = "127.0.0.1"
+comm_telegram_port = 8085
 
 wingman_host = "127.0.0.1"
 wingman_port = 8089

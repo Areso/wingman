@@ -246,16 +246,11 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	b.api.Send(msg)
 }
 
-// invokePlugin sends a request to invoke a plugin
+// invokePlugin sends a request to queue a plugin task on the wingman core
 func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
-	// Convert request to JSON
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
 	var wingman_config struct {
 		Host string `toml:"wingman_host"`
-		Port int    `toml:"port"`
+		Port int    `toml:"wingman_port"`
 	}
 	if _, err := toml.DecodeFile("config.toml", &wingman_config); err != nil {
 		log.Printf("Failed to read config.toml: %v", err)
@@ -263,9 +258,15 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 		wingman_config.Host = "127.0.0.1"
 		wingman_config.Port = 8089
 	}
-	// Send HTTP POST request to wingman
-	url := fmt.Sprintf("http://%s:%d/invoke_plugin", wingman_config.Host, wingman_config.Port)
-	log.Printf("%s", url)
+
+	// Queue the task on the wingman core
+	queueReq := map[string]string{"plugin_id": pluginID}
+	jsonData, err := json.Marshal(queueReq)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+	url := fmt.Sprintf("http://%s:%d/queue_add_task", wingman_config.Host, wingman_config.Port)
+	log.Printf("Queuing task on wingman: %s", url)
 	httpReq, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
@@ -329,8 +330,8 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 func main() {
 	// Load config from file or use defaults
 	var config struct {
-		Host string `toml:"host"`
-		Port int    `toml:"port"`
+		Host string `toml:"comm_telegram_host"`
+		Port int    `toml:"comm_telegram_port"`
 	}
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Printf("Failed to read config.toml: %v", err)
