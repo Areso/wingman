@@ -253,8 +253,18 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
+	var wingman_config struct {
+		Host string `toml:"host"`
+		Port int    `toml:"port"`
+	}
+	if _, err := toml.DecodeFile("config.toml", &wingman_config); err != nil {
+		log.Printf("Failed to read config.toml: %v", err)
+		log.Print("Using default host 127.0.0.1 and port 8085")
+		wingman_config.Host = "127.0.0.1"
+		wingman_config.Port = 8089
+	}
 	// Send HTTP POST request to wingman
-	url := fmt.Sprintf("http://127.0.0.1:%d/invoke_plugin", b.port)
+	url := fmt.Sprintf("http://%d:%d/invoke_plugin", wingman_config.Host, wingman_config.Port)
 	httpReq, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
@@ -324,9 +334,9 @@ func main() {
 	}
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Printf("Failed to read config.toml: %v", err)
-		log.Print("Using default host 127.0.0.1 and port 8089")
+		log.Print("Using default host 127.0.0.1 and port 8085")
 		config.Host = "127.0.0.1"
-		config.Port = 8089
+		config.Port = 8085
 	}
 
 	// Load bot token from systemd credential
