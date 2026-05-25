@@ -81,7 +81,8 @@ func initDB(path string) (*sql.DB, error) {
 			created_at INTEGER NOT NULL,
 			invoked_at INTEGER,
 			plugin_id TEXT NOT NULL,
-			finished_at INTEGER
+			finished_at INTEGER,
+			result TEXT
 		)
 	`)
 	if err != nil {
