@@ -254,17 +254,18 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 	var wingman_config struct {
-		Host string `toml:"host"`
+		Host string `toml:"wingman_host"`
 		Port int    `toml:"port"`
 	}
 	if _, err := toml.DecodeFile("config.toml", &wingman_config); err != nil {
 		log.Printf("Failed to read config.toml: %v", err)
-		log.Print("Using default host 127.0.0.1 and port 8085")
+		log.Print("Using default host 127.0.0.1 and port 8089")
 		wingman_config.Host = "127.0.0.1"
 		wingman_config.Port = 8089
 	}
 	// Send HTTP POST request to wingman
-	url := fmt.Sprintf("http://%d:%d/invoke_plugin", wingman_config.Host, wingman_config.Port)
+	url := fmt.Sprintf("http://%s:%d/invoke_plugin", wingman_config.Host, wingman_config.Port)
+	log.Printf("%s", url)
 	httpReq, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
@@ -301,7 +302,7 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Find plugin
-	plugin, exists := b.plugins[req.ID]
+	_, exists := b.plugins[req.ID]
 	if !exists {
 		http.Error(w, "Plugin not found", http.StatusNotFound)
 		return
@@ -313,15 +314,14 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 	// Make HTTP request to wingman to invoke the plugin
 	if err := b.invokePlugin(req.ID, req); err != nil {
 		log.Printf("Error invoking plugin %s: %v", req.ID, err)
-		//msg := tgbotapi.NewMessage(1, fmt.Sprintf("Plugin %s invoked with parameters: %v", plugin.Name, req.Params))
-		//msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
-		//b.api.Send(msg)
+		http.Error(w, fmt.Sprintf("Error invoking plugin: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// For now, we'll simulate it with a message
-	msg := tgbotapi.NewMessage(1, fmt.Sprintf("Plugin %s invoked with parameters: %v", plugin.Name, req.Params))
-	b.api.Send(msg)
+	// Note: Since this is an HTTP endpoint, we don't have direct access to user context
+	// This is a simplified version - in practice, you'd want to implement proper user tracking
+	log.Printf("Plugin %s invoked with parameters: %v", req.ID, req.Params)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Plugin invoked successfully"))
 }
@@ -354,7 +354,7 @@ func main() {
 
 	// Load plugins
 	log.Println("Loading plugins...")
-	if err := bot.loadPlugins("plugins"); err != nil {
+	if err := bot.loadPlugins("../../plugins"); err != nil {
 		log.Fatalf("Failed to load plugins: %v", err)
 	}
 
