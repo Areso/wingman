@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -132,12 +133,14 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		// Execute plugin
 		cmd := exec.Command(p.InvocationWith, p.InvocationFile)
 		cmd.Dir = p.Dir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 		log.Printf("invoking queued task %d (plugin %s): %s %s", id, p.ID, p.InvocationWith, p.InvocationFile)
 		runErr := cmd.Run()
 		finishTime := time.Now().UTC().Unix()
-		_, err = db.Exec("UPDATE tasks_queued SET finished_at = ? WHERE id = ?", finishTime, id)
+		result := stdout.String() + "\n" + stderr.String()
+		_, err = db.Exec("UPDATE tasks_queued SET finished_at = ?, result = ? WHERE id = ?", finishTime, result, id)
 		if err != nil {
 			log.Printf("error updating finished_at for task %d: %v", id, err)
 		}

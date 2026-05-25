@@ -1,1 +1,2 @@
 echo "app.sh was run" >> 1.txt
+echo "success!"
