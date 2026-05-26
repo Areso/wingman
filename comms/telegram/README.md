@@ -52,10 +52,9 @@ go run main.go
 
 
 curl -X POST localhost:8085/send_message_to_chat_id \
--d '{"chat_id":360650628,"message":"privet"}'
+-d '{"chat_id":XX,"message":"privet"}'
 
 curl -X POST localhost:8085/invoke_plugin \
 -d '{"id":"check_mysql_port_open_on_localhost","params":{}}'
 
 ```
-360650628

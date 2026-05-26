@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,10 +134,8 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 func (b *Bot) start() error {
 	// Set up HTTP endpoint for plugin invocation
 	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
-
 	// Set up HTTP endpoint for sending a message
 	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessageToChatID)
-
 	go func() {
 		log.Printf("Starting HTTP server on :%d", b.port)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
@@ -181,7 +180,6 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 	// send message to a telegram chat
 	msg := tgbotapi.NewMessage(req.ChatID, req.Message)
 	b.api.Send(msg)
-
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Message sent successfully"))
@@ -192,13 +190,11 @@ func (b *Bot) sendMainMenu(chatID int64) {
 	log.Printf("Chat ID is %d", chatID)
 	var rows [][]tgbotapi.InlineKeyboardButton
 	var pluginButtons []tgbotapi.InlineKeyboardButton
-
 	// Create buttons for each plugin
 	for _, plugin := range b.plugins {
 		// Use plugin ID as callback data and name as button text
 		pluginButtons = append(pluginButtons, tgbotapi.NewInlineKeyboardButtonData(plugin.Name, plugin.ID))
 	}
-
 	// Create 2-column grid for buttons
 	for i, button := range pluginButtons {
 		if i%2 == 0 {
@@ -206,9 +202,7 @@ func (b *Bot) sendMainMenu(chatID int64) {
 		}
 		rows[len(rows)-1] = append(rows[len(rows)-1], button)
 	}
-
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-
 	msg := tgbotapi.NewMessage(chatID, "Select a plugin to run:")
 	msg.ReplyMarkup = keyboard
 	b.api.Send(msg)
@@ -261,7 +255,8 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	b.api.Send(msg)
 
 	// Make HTTP request to wingman to invoke the plugin
-	if err := b.invokePlugin(pluginID, req); err != nil {
+	chatIDStr := strconv.FormatInt(callback.Message.Chat.ID, 10)
+	if err := b.invokePlugin(pluginID, req, "comms_tg_menu", chatIDStr); err != nil {
 		log.Printf("Error invoking plugin %s: %v", pluginID, err)
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
 		b.api.Send(msg)
@@ -274,7 +269,7 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 }
 
 // invokePlugin sends a request to queue a plugin task on the wingman core
-func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
+func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_with string, inv_by string) error {
 	var wingman_config struct {
 		Host string `toml:"wingman_host"`
 		Port int    `toml:"wingman_port"`
@@ -286,7 +281,10 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 		wingman_config.Port = 8089
 	}
 	// Queue the task on the wingman core
-	queueReq := map[string]string{"plugin_id": pluginID}
+	queueReq := map[string]string{
+		"plugin_id": pluginID,
+		"inv_with":  inv_with,
+		"inv_by":    inv_by}
 	jsonData, err := json.Marshal(queueReq)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
@@ -339,7 +337,7 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 	// Here you would actually invoke the plugin
 
 	// Make HTTP request to wingman to invoke the plugin
-	if err := b.invokePlugin(req.ID, req); err != nil {
+	if err := b.invokePlugin(req.ID, req, "HTTP endpoint", "n/a"); err != nil {
 		log.Printf("Error invoking plugin %s: %v", req.ID, err)
 		http.Error(w, fmt.Sprintf("Error invoking plugin: %v", err), http.StatusInternalServerError)
 		return

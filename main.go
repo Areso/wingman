@@ -76,14 +76,24 @@ func initDB(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// FORCE Go to actually open the sqlite file right now
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("database ping failed: %w", err)
+	}
+
+	// invoked_with cron, telegram, email
+	// cron N/A,chat_id, email
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS tasks_queued (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			created_at INTEGER NOT NULL,
 			invoked_at INTEGER,
+			invoked_with TEXT,
+			invoked_by_id TEXT,
 			plugin_id TEXT NOT NULL,
 			finished_at INTEGER,
-			result TEXT
+			result TEXT,
+			result_sent_at INTEGER
 		)
 	`)
 	if err != nil {
@@ -92,17 +102,22 @@ func initDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func create_task(db *sql.DB, p Plugin) {
+func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string) (int64, error) {
 	now := time.Now().UTC().Unix()
-	_, err := db.Exec( //res, err:
-		"INSERT INTO tasks_queued (created_at, plugin_id) VALUES (?, ?)",
-		now, p.ID,
+	res, err := db.Exec( //res, err:
+		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id) VALUES (?, ?, ?, ?)",
+		now, p.ID, inv_with, inv_id,
 	)
 	if err != nil {
 		log.Printf("error inserting task for %s: %v", p.ID, err)
-		return
+		return 0, err
 	}
-	// id, _ := res.LastInsertId()
+	id, _ := res.LastInsertId()
+	if err != nil {
+		log.Printf("error getting last insert ID for %s: %v", p.ID, err)
+		return 0, err
+	}
+	return id, nil
 }
 
 func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
@@ -194,6 +209,9 @@ func main() {
 
 		var req struct {
 			PluginID string `json:"plugin_id"`
+			Chat_ID  int    `json:"chat_id"`
+			Inv_With string `json:"inv_with"`
+			Inv_By   string `json:"inv_by"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -206,17 +224,7 @@ func main() {
 			return
 		}
 
-		now := time.Now().UTC().Unix()
-		res, err := db.Exec(
-			"INSERT INTO tasks_queued (created_at, plugin_id) VALUES (?, ?)",
-			now, p.ID,
-		)
-		if err != nil {
-			log.Printf("error inserting task for %s: %v", p.ID, err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
-		id, _ := res.LastInsertId()
+		id, _ := create_task(db, p, req.Inv_With, req.Inv_By)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]int64{"id": id})
@@ -237,7 +245,7 @@ func main() {
 				continue
 			}
 			if matchesCron(p.CroneTime, now) {
-				create_task(db, p)
+				create_task(db, p, "cron", "n/a")
 			}
 		}
 	}
