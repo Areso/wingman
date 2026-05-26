@@ -33,6 +33,12 @@ type PluginInvocationRequest struct {
 	Params map[string]string `json:"params"`
 }
 
+// SendMsgRequest represents the request to send a message to a chat
+type SendMsgRequest struct {
+	chatID  int64  `json:"chat_id"`
+	message string `json:"message"`
+}
+
 // Config holds the bot configuration
 type Config struct {
 	BotToken string `toml:"bot_token"`
@@ -127,6 +133,10 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 func (b *Bot) start() error {
 	// Set up HTTP endpoint for plugin invocation
 	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
+
+	// Set up HTTP endpoint for sending a message
+	http.HandleFunc("/send_message_to_chat_id", b.send_message_to_chat_id)
+
 	go func() {
 		log.Printf("Starting HTTP server on :%d", b.port)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
@@ -151,24 +161,35 @@ func (b *Bot) start() error {
 	return nil
 }
 
-// handleMessage handles incoming messages from users
-func (b *Bot) handleMessage(message *tgbotapi.Message) {
-	log.Printf("Received message: %s", message.Text)
-
-	switch message.Text {
-	case "/start", "/help":
-		b.sendMainMenu(message.Chat.ID)
-	case "/plugins":
-		b.sendPluginList(message.Chat.ID)
-	default:
-		// Respond to unrecognized commands
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /help for available commands.")
-		b.api.Send(msg)
+// handleSendMessageToChatID handles the /send_message_to_chat_id <chat_id> <message> command
+func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	var req SendMsgRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	// send message to a telegram chat
+	msg := tgbotapi.NewMessage(SendMsgRequest.chatID, SendMsgRequest.message)
+	b.api.Send(msg)
+
+	// end of block sending message to a telegram chat
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Plugin invoked successfully"))
 }
 
 // sendMainMenu sends the main menu with plugin options
 func (b *Bot) sendMainMenu(chatID int64) {
+	log.Printf("Chat ID is %d", chatID)
 	var rows [][]tgbotapi.InlineKeyboardButton
 	var pluginButtons []tgbotapi.InlineKeyboardButton
 
@@ -258,7 +279,6 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest) error {
 		wingman_config.Host = "127.0.0.1"
 		wingman_config.Port = 8089
 	}
-
 	// Queue the task on the wingman core
 	queueReq := map[string]string{"plugin_id": pluginID}
 	jsonData, err := json.Marshal(queueReq)
@@ -318,7 +338,6 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Error invoking plugin: %v", err), http.StatusInternalServerError)
 		return
 	}
-
 	// For now, we'll simulate it with a message
 	// Note: Since this is an HTTP endpoint, we don't have direct access to user context
 	// This is a simplified version - in practice, you'd want to implement proper user tracking
