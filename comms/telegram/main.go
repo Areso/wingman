@@ -35,8 +35,8 @@ type PluginInvocationRequest struct {
 
 // SendMsgRequest represents the request to send a message to a chat
 type SendMsgRequest struct {
-	chatID  int64  `json:"chat_id"`
-	message string `json:"message"`
+	ChatID  int64  `json:"chat_id"`
+	Message string `json:"message"`
 }
 
 // Config holds the bot configuration
@@ -135,7 +135,7 @@ func (b *Bot) start() error {
 	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
 
 	// Set up HTTP endpoint for sending a message
-	http.HandleFunc("/send_message_to_chat_id", b.send_message_to_chat_id)
+	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessageToChatID)
 
 	go func() {
 		log.Printf("Starting HTTP server on :%d", b.port)
@@ -179,12 +179,12 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// send message to a telegram chat
-	msg := tgbotapi.NewMessage(req.chatID, req.message)
+	msg := tgbotapi.NewMessage(req.ChatID, req.Message)
 	b.api.Send(msg)
 
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Plugin invoked successfully"))
+	w.Write([]byte("Message sent successfully"))
 }
 
 // sendMainMenu sends the main menu with plugin options
@@ -225,6 +225,12 @@ func (b *Bot) sendPluginList(chatID int64) {
 
 	msg := tgbotapi.NewMessage(chatID, message.String())
 	b.api.Send(msg)
+}
+
+// handleMessage handles incoming messages
+func (b *Bot) handleMessage(message *tgbotapi.Message) {
+	// Send the main menu with plugin options
+	b.sendMainMenu(message.Chat.ID)
 }
 
 // handleCallback handles callback queries (button clicks)

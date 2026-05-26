@@ -47,8 +47,15 @@ Plugins in the `plugins/` directory must have a `plugin.json` file with at least
 ```
 
 ## to run (working_dir: wingman/comms/telegram %)
+```
 go run main.go
 
-curl -X POST localhost:8085/send_message_to_chat_id -d "{'message':'test'}"
+
+curl -X POST localhost:8085/send_message_to_chat_id \
+-d '{"chat_id":360650628,"message":"privet"}'
+
 curl -X POST localhost:8085/invoke_plugin \
--d "{'id':'check_mysql_port_open_on_localhost','params':''}"
+-d '{"id":"check_mysql_port_open_on_localhost","params":{}}'
+
+```
+360650628
