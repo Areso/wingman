@@ -179,7 +179,7 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// send message to a telegram chat
-	msg := tgbotapi.NewMessage(SendMsgRequest.chatID, SendMsgRequest.message)
+	msg := tgbotapi.NewMessage(req.chatID, req.message)
 	b.api.Send(msg)
 
 	// end of block sending message to a telegram chat
