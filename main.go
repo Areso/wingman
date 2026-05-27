@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -189,7 +190,8 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 		if invokedWith == "comms_tg_menu" {
 			log.Printf("invoked with telegram dialog")
 			// send to tg
-			tg_call_res := sendResultToTelegram(db, config, invokedByID, result, id)
+			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
+			tg_call_res := sendResultToTelegram(db, config, invokedByID_int, result, id)
 			if tg_call_res == 0 {
 				now := time.Now().UTC().Unix()
 				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
@@ -217,7 +219,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 	}
 }
 
-func sendResultToTelegram(db *sql.DB, config *Config, invokedByID string, result string, taskID int64) int {
+func sendResultToTelegram(db *sql.DB, config *Config, invokedByID int64, result string, taskID int64) int {
 	// Prepare request to send message via telegram
 	req := map[string]interface{}{
 		"chat_id": invokedByID,

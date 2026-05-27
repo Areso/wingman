@@ -163,17 +163,21 @@ func (b *Bot) start() error {
 // handleSendMessageToChatID handles the /send_message_to_chat_id <chat_id> <message> command
 func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
+		log.Printf("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		log.Printf("Failed to read request body")
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 	var req SendMsgRequest
 	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("Invalid JSON")
+		log.Printf(string(body))
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
