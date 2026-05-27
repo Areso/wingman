@@ -165,16 +165,107 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 	}
 }
 
+func processFinishedTasks(db *sql.DB, config *Config) {
+	for range time.NewTicker(time.Second * 5).C {
+		var id int64
+		var invokedWith string
+		var invokedByID string
+		var result string
+
+		err := db.QueryRow(`
+			SELECT id, invoked_with, invoked_by_id, result 
+			FROM tasks_queued 
+			WHERE finished_at IS NOT NULL
+			AND result_sent_at IS NULL 
+			LIMIT 1
+		`).Scan(&id, &invokedWith, &invokedByID, &result)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				log.Printf("error querying tasks for telegram results: %v", err)
+			}
+			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
+			continue
+		}
+		if invokedWith == "comms_tg_menu" {
+			log.Printf("invoked with telegram dialog")
+			// send to tg
+			tg_call_res := sendResultToTelegram(db, config, invokedByID, result, id)
+			if tg_call_res == 0 {
+				now := time.Now().UTC().Unix()
+				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
+				if err != nil {
+					log.Printf("error updating result_sent_at for task %d: %v", id, err)
+				} else {
+					log.Printf("successfully sent telegram result for task %d", id)
+				}
+			} else {
+				log.Printf("the call to comms/telegram/ service returned error")
+				continue
+			}
+		} else {
+			// Skip non-telegram tasks
+			log.Printf("invoked with NON telegram dialog")
+			now := time.Now().UTC().Unix()
+			_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
+			if err != nil {
+				log.Printf("error updating result_sent_at for task %d: %v", id, err)
+			} else {
+				log.Printf("successfully sent telegram result for task %d", id)
+			}
+			continue
+		}
+	}
+}
+
+func sendResultToTelegram(db *sql.DB, config *Config, invokedByID string, result string, taskID int64) int {
+	// Prepare request to send message via telegram
+	req := map[string]interface{}{
+		"chat_id": invokedByID,
+		"message": result,
+	}
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
+		return -1
+	}
+	url := fmt.Sprintf("http://%s:%d/send_message_to_chat_id", config.CommTelegramHost, config.CommTelegramPort)
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
+		return -1
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		log.Printf("error sending telegram message for task %d: %v", taskID, err)
+		return -1
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return 0
+	} else {
+		log.Printf("telegram API returned status %d for task %d", resp.StatusCode, taskID)
+		return -1
+	}
+}
+
+type Config struct {
+	Host             string `toml:"host"`
+	Port             int    `toml:"port"`
+	CommTelegramHost string `toml:"comm_telegram_host"`
+	CommTelegramPort int    `toml:"comm_telegram_port"`
+}
+
 func main() {
 	// Read config
-	var config struct {
-		Host string `toml:"host"`
-		Port int    `toml:"port"`
-	}
+	var config Config
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Printf("Failed to read config.toml, using defaults: %v", err)
 		config.Host = "127.0.0.1"
 		config.Port = 8089
+		config.CommTelegramHost = "127.0.0.1"
+		config.CommTelegramPort = 8085
 	}
 
 	db, err := initDB("wingman.db")
@@ -198,6 +289,9 @@ func main() {
 
 	// Start the queued task processor
 	go processQueuedTasks(db, pluginsMap)
+
+	// Start the telegram results sender
+	go processFinishedTasks(db, &config)
 
 	// Set up HTTP endpoints
 
