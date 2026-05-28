@@ -1,0 +1,4 @@
+curl "https://api.openweathermap.org/data/4.0/onecall/timeline/1h?lat=34.71&lon=33.02&appid={}"
+curl "https://api.openweathermap.org/data/2.5/weather?q=Limassol,cy&APPID={}&units=metric"
+curl "https://api.openweathermap.org/data/2.5/forecast?q=Limassol,cy&APPID={}&units=metric"
+

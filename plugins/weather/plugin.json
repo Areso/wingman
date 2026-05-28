@@ -1,0 +1,9 @@
+{
+    "id":"get_weather_forecast",
+    "name":"Get weather forecast for next 18hrs",
+    "invocation_with":"python3",
+    "invocation_file":"weather.py",
+    "adhoc":"true",
+    "crone":"true",
+    "crone_time":"30 7 * * *"
+}
