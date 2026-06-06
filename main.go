@@ -147,7 +147,8 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			continue
 		}
 		// Execute plugin
-		cmd := exec.Command(p.InvocationWith, p.InvocationFile)
+		fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
+		cmd := exec.Command("bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -181,8 +182,9 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 			LIMIT 1
 		`).Scan(&id, &invokedWith, &invokedByID, &result)
 		if err != nil {
-			if err != sql.ErrNoRows {
-				log.Printf("error querying tasks for telegram results: %v", err)
+			if err == sql.ErrNoRows {
+				// No tasks ready to process right now; safely skip
+				continue
 			}
 			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
 			continue

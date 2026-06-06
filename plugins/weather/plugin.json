@@ -1,9 +1,11 @@
 {
     "id":"get_weather_forecast",
     "name":"Get weather forecast for next 18hrs",
-    "invocation_with":"python3",
+    "invocation_with":"source .venv/bin/activate; python3",
     "invocation_file":"weather.py",
+    "options":["Cyprus, Limassol","Cyprus, Paphos","Cyprus, Larnaca", "Cyprus, Nicosia"],
     "adhoc":"true",
     "crone":"true",
-    "crone_time":"30 7 * * *"
+    "crone_time":"30 7 * * *",
+    "guest_allowed": true
 }
