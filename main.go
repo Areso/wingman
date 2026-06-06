@@ -114,8 +114,8 @@ func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params ma
 	if err != nil {
 		return 0, fmt.Errorf("error marshaling parmas for %s: %w", p.ID, err)
 	}
-	res, err := db.Exec( //res, err:
-		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id, params) VALUES (?, ?, ?, ?)",
+	res, err := db.Exec(
+		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id, params) VALUES (?, ?, ?, ?, ?)",
 		now, p.ID, inv_with, inv_id, string(paramsJSON),
 	)
 	if err != nil {

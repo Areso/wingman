@@ -13,7 +13,7 @@ def openweather_location(option):
     return option
 
 def get_weather():
-    location = openweather_location(sys.argv[1] if len(sys.arv)> 1 else "")
+    location = openweather_location(sys.argv[1] if len(sys.argv)> 1 else "")
     secret_path = Path("/Users/areso/.wingman/weather")
     try:
         api_key = secret_path.read_text().strip()

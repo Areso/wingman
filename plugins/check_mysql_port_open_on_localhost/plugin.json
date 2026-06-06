@@ -3,6 +3,7 @@
     "name":"Check MySQL port open on localhost",
     "invocation_with":"sh",
     "invocation_file":"app.sh",
+    "options":[],
     "adhoc":"true",
     "crone":"true",
     "crone_time":"* * * * *"
