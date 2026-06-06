@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -92,6 +93,7 @@ func initDB(path string) (*sql.DB, error) {
 			invoked_with TEXT,
 			invoked_by_id TEXT,
 			plugin_id TEXT NOT NULL,
+			params TEXT,
 			finished_at INTEGER,
 			result TEXT,
 			result_sent_at INTEGER
@@ -103,17 +105,24 @@ func initDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string) (int64, error) {
+func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params map[string]string) (int64, error) {
 	now := time.Now().UTC().Unix()
+	if params == nil {
+		params = make(map[string]string)
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return 0, fmt.Errorf("error marshaling parmas for %s: %w", p.ID, err)
+	}
 	res, err := db.Exec( //res, err:
-		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id) VALUES (?, ?, ?, ?)",
-		now, p.ID, inv_with, inv_id,
+		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id, params) VALUES (?, ?, ?, ?)",
+		now, p.ID, inv_with, inv_id, string(paramsJSON),
 	)
 	if err != nil {
 		log.Printf("error inserting task for %s: %v", p.ID, err)
 		return 0, err
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
 	if err != nil {
 		log.Printf("error getting last insert ID for %s: %v", p.ID, err)
 		return 0, err
@@ -121,12 +130,20 @@ func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string) (int64, e
 	return id, nil
 }
 
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
 func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 	for range time.NewTicker(time.Second).C {
 		// Find queued tasks that haven't been invoked yet
 		var id int64
 		var pluginID string
-		err := db.QueryRow("SELECT id, plugin_id FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1").Scan(&id, &pluginID)
+		var paramsRaw sql.NullString
+		err := db.QueryRow("SELECT id, plugin_id, params FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1").Scan(&id, &pluginID, &paramsRaw)
 		if err != nil {
 			if err != sql.ErrNoRows {
 				log.Printf("error querying queued tasks: %v", err)
@@ -147,13 +164,22 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			continue
 		}
 		// Execute plugin
+		params := make(map[string]string)
+		if paramsRaw.Valid && paramsRaw.String != "" {
+			if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
+				log.Printf("error unmarshalling params for task %d: %v", id, err)
+			}
+		}
 		fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
+		if option := params["option"]; option != "" {
+			fullCommand = fmt.Sprint("%s %s", fullCommand, shellQuote(option))
+		}
 		cmd := exec.Command("bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		log.Printf("invoking queued task %d (plugin %s): %s %s", id, p.ID, p.InvocationWith, p.InvocationFile)
+		log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
 		runErr := cmd.Run()
 		finishTime := time.Now().UTC().Unix()
 		result := stdout.String() + "\n" + stderr.String()
@@ -306,10 +332,11 @@ func main() {
 		}
 
 		var req struct {
-			PluginID string `json:"plugin_id"`
-			Chat_ID  int    `json:"chat_id"`
-			Inv_With string `json:"inv_with"`
-			Inv_By   string `json:"inv_by"`
+			PluginID string            `json:"plugin_id"`
+			Chat_ID  int               `json:"chat_id"`
+			Inv_With string            `json:"inv_with"`
+			Inv_By   string            `json:"inv_by"`
+			Params   map[string]string `json:"params"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -322,8 +349,11 @@ func main() {
 			return
 		}
 
-		id, _ := create_task(db, p, req.Inv_With, req.Inv_By)
-
+		id, err := create_task(db, p, req.Inv_With, req.Inv_By, req.Params)
+		if err != nil {
+			http.Error(w, "Failed to queue task", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]int64{"id": id})
 	})
@@ -343,7 +373,9 @@ func main() {
 				continue
 			}
 			if matchesCron(p.CroneTime, now) {
-				create_task(db, p, "cron", "n/a")
+				if _, err := create_task(db, p, "cron", "n/a", nil); err != nil {
+					log.Printf("error creating cron task for %s: %v", p.ID, err)
+				}
 			}
 		}
 	}

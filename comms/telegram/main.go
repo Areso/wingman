@@ -18,13 +18,14 @@ import (
 
 // Plugin represents a loaded plugin
 type Plugin struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	InvocationWith string `json:"invocation_with"`
-	InvocationFile string `json:"invocation_file"`
-	Adhoc          string `json:"adhoc"`
-	Crone          string `json:"crone"`
-	CroneTime      string `json:"crone_time"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	InvocationWith string   `json:"invocation_with"`
+	InvocationFile string   `json:"invocation_file"`
+	Options        []string `json:"options"`
+	Adhoc          string   `json:"adhoc"`
+	Crone          string   `json:"crone"`
+	CroneTime      string   `json:"crone_time"`
 	Dir            string
 }
 
@@ -130,6 +131,22 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 	return nil
 }
 
+// sendPluginOptions sejds the fixd option list from plugin.json
+func (b *Bot) sendPluginOptions(chatID int64, plugin *Plugin) {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for i, option := range plugin.Options {
+		callbackData := fmt.Sprintf("option:%s:%d", plugin.ID, i)
+		rows = append(rows, []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData(option, callbackData),
+		})
+	}
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Select an option for %s:", plugin.Name))
+	msg.ReplyMarkup = keyboard
+	b.api.Send(msg)
+}
+
 // start initializes and starts the bot
 func (b *Bot) start() error {
 	// Set up HTTP endpoint for plugin invocation
@@ -231,12 +248,62 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	b.sendMainMenu(message.Chat.ID)
 }
 
+func (b *Bot) handleOptionCallback(callback *tgbotapi.CallbackQuery) {
+	parts := strings.Split(callback.Data, ":")
+	if len(parts) != 3 {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Invalid option selection")
+		b.api.Send(msg)
+		return
+	}
+
+	pluginID := parts[1]
+	optionIndex, err := strconv.Atoi(parts[2])
+	if err != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Invalid option selection")
+		b.api.Send(msg)
+		return
+	}
+
+	plugin, exists := b.plugins[pluginID]
+	if !exists || optionIndex < 0 || optionIndex >= len(plugin.Options) {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Option not found")
+		b.api.Send(msg)
+		return
+	}
+
+	selectedOption := plugin.Options[optionIndex]
+	req := PluginInvocationRequest{
+		ID: pluginID,
+		Params: map[string]string{
+			"option": selectedOption,
+		},
+	}
+
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Invoking %s with %s...", plugin.Name, selectedOption))
+	b.api.Send(msg)
+
+	chatIDStr := strconv.FormatInt(callback.Message.Chat.ID, 10)
+	if err := b.invokePlugin(pluginID, req, "comms_tg_menu", chatIDStr); err != nil {
+		log.Printf("Error invoking plugin %s: %v", pluginID, err)
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
+		b.api.Send(msg)
+		return
+	}
+
+	msg = tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Plugin %s invoked successfully!", plugin.Name))
+	b.api.Send(msg)
+}
+
 // handleCallback handles callback queries (button clicks)
 func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	// Acknowledge callback
 	ack := tgbotapi.NewCallback(callback.ID, "Processing...")
 	b.api.Send(ack)
 
+	if strings.HasPrefix(callback.Data, "option:") {
+		b.handleOptionCallback(callback)
+		return
+	}
 	// Extract plugin ID from callback data (this should be the plugin ID)
 	pluginID := callback.Data
 
@@ -245,6 +312,11 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	if !exists {
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Plugin not found")
 		b.api.Send(msg)
+		return
+	}
+
+	if len(plugin.Options) > 0 {
+		b.sendPluginOptions(callback.Message.Chat.ID, plugin)
 		return
 	}
 
