@@ -7,5 +7,6 @@
     "adhoc":"true",
     "crone":"true",
     "crone_time":"30 7 * * *",
-    "guest_allowed": true
+    "guest_allowed": true,
+    "min_level": "guest"
 }

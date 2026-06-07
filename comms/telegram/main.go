@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Plugin represents a loaded plugin
@@ -41,6 +43,11 @@ type SendMsgRequest struct {
 	Message string `json:"message"`
 }
 
+// SendMsgRequestToDefault represents the request to send a message to the default chat
+type SendMsgRequestToDefault struct {
+	Message string `json:"message"`
+}
+
 // Config holds the bot configuration
 type Config struct {
 	BotToken string `toml:"bot_token"`
@@ -52,6 +59,7 @@ type Bot struct {
 	api     *tgbotapi.BotAPI
 	plugins map[string]*Plugin
 	port    int
+	db      *sql.DB
 }
 
 // newBot creates a new bot instance
@@ -66,6 +74,43 @@ func newBot(token string, port int) (*Bot, error) {
 		plugins: make(map[string]*Plugin),
 		port:    port,
 	}, nil
+}
+
+// initTelegramDB opens (or creates) telegram.db and ensures the known_ids table exists.
+func initTelegramDB(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("database ping failed: %w", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS known_ids (
+			chat_id    INTEGER NOT NULL,
+			level      TEXT    NOT NULL,
+			is_default INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL DEFAULT (unixepoch())
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+// getDefaultChatID returns the chat_id marked as the default owner, if any.
+func getDefaultChatID(db *sql.DB) (int64, error) {
+	var chatID int64
+	err := db.QueryRow(`
+		SELECT chat_id
+		FROM known_ids
+		WHERE level = 'owner'
+		  AND is_default = 1
+		ORDER BY chat_id ASC
+		LIMIT 1
+	`).Scan(&chatID)
+	return chatID, err
 }
 
 // loadBotToken loads the bot token from systemd credentials
@@ -153,6 +198,8 @@ func (b *Bot) start() error {
 	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
 	// Set up HTTP endpoint for sending a message
 	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessageToChatID)
+	// Set up HTTP endpoint for sending a message to the default chat
+	http.HandleFunc("/send_message_to_default", b.handleSendMessageToDefault)
 	go func() {
 		log.Printf("Starting HTTP server on :%d", b.port)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
@@ -200,6 +247,47 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 	}
 	// send message to a telegram chat
 	msg := tgbotapi.NewMessage(req.ChatID, req.Message)
+	b.api.Send(msg)
+	// end of block sending message to a telegram chat
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Message sent successfully"))
+}
+
+// handleSendMessageToDefault handles /send_message_to_default <message> by resolving the
+// default owner chat_id from the known_ids table and forwarding the message there.
+func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		log.Printf("Method not allowed")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Failed to read request body")
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+	var req SendMsgRequestToDefault
+	if err := json.Unmarshal(body, &req); err != nil {
+		log.Printf("Invalid JSON")
+		log.Printf(string(body))
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	chatID, err := getDefaultChatID(b.db)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("no default owner chat_id configured in known_ids")
+			http.Error(w, "no default chat configured", http.StatusNotFound)
+			return
+		}
+		log.Printf("error querying default chat_id: %v", err)
+		http.Error(w, "Failed to resolve default chat", http.StatusInternalServerError)
+		return
+	}
+	// send message to the resolved default telegram chat
+	msg := tgbotapi.NewMessage(chatID, req.Message)
 	b.api.Send(msg)
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
@@ -451,6 +539,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
+
+	// Open telegram.db and ensure schema exists
+	db, err := initTelegramDB("telegram.db")
+	if err != nil {
+		log.Fatalf("Failed to init telegram db: %v", err)
+	}
+	defer db.Close()
+	bot.db = db
 
 	// Load plugins
 	log.Println("Loading plugins...")

@@ -6,5 +6,6 @@
     "options":[],
     "adhoc":"true",
     "crone":"true",
-    "crone_time":"* * * * *"
+    "crone_time":"* * * * *",
+    "min_level": "guest"
 }

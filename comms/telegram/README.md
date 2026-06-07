@@ -58,3 +58,8 @@ curl -X POST localhost:8085/invoke_plugin \
 -d '{"id":"check_mysql_port_open_on_localhost","params":{}}'
 
 ```
+
+test default:
+```
+curl -X POST localhost:8085/send_message_to_default -d '{"message":"privet"}'
+```

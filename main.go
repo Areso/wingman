@@ -102,6 +102,17 @@ func initDB(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS wingman_settings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			s_key TEXT NOT NULL,
+			s_value TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		return nil, err
+	}
 	return db, nil
 }
 
