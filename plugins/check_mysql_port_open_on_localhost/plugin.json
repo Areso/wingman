@@ -7,5 +7,5 @@
     "adhoc":"true",
     "crone":"true",
     "crone_time":"* * * * *",
-    "min_level": "guest"
+    "min_allowed_role": "guest"
 }

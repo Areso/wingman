@@ -88,7 +88,7 @@ func initTelegramDB(path string) (*sql.DB, error) {
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS known_ids (
 			chat_id    INTEGER NOT NULL,
-			level      TEXT    NOT NULL,
+			role       TEXT    NOT NULL,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL DEFAULT (unixepoch())
 		)
@@ -105,7 +105,7 @@ func getDefaultChatID(db *sql.DB) (int64, error) {
 	err := db.QueryRow(`
 		SELECT chat_id
 		FROM known_ids
-		WHERE level = 'owner'
+		WHERE role = 'owner'
 		  AND is_default = 1
 		ORDER BY chat_id ASC
 		LIMIT 1
