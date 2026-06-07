@@ -29,6 +29,7 @@ type Plugin struct {
 	Crone          string   `json:"crone"`
 	CroneTime      string   `json:"crone_time"`
 	Dir            string
+	MinAllowedRole string `json:"min_allowed_role"`
 }
 
 // PluginInvocationRequest represents the request to invoke a plugin
@@ -97,6 +98,20 @@ func initTelegramDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+// getRole returns the role for a given chat_id from the known_ids table.
+func getRole(db *sql.DB, chatID int64) string {
+	var role string
+	err := db.QueryRow(`
+		SELECT role
+		FROM   known_ids
+		WHERE  chat_id = $1
+	`, chatID).Scan(&role)
+	if err != nil {
+		return "guest"
+	}
+	return role
 }
 
 // getDefaultChatID returns the chat_id marked as the default owner, if any.
@@ -294,17 +309,33 @@ func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte("Message sent successfully"))
 }
 
-// sendMainMenu sends the main menu with plugin options
-func (b *Bot) sendMainMenu(chatID int64) {
+// pluginAllowed checks whether a plugin is accessible for the given user role.
+func pluginAllowed(role string, plugin *Plugin) bool {
+	minRole := plugin.MinAllowedRole
+	if minRole == "" {
+		return false
+	}
+
+	order := map[string]int{"guest": 0, "user": 1, "owner": 2}
+	pluginLevel, pluginOk := order[minRole]
+	userLevel, userOk := order[role]
+	if !pluginOk || !userOk {
+		return false
+	}
+	return userLevel >= pluginLevel
+}
+
+// sendMainMenu sends the main menu with plugin options filtered by role
+func (b *Bot) sendMainMenu(chatID int64, role string) {
 	log.Printf("Chat ID is %d", chatID)
 	var rows [][]tgbotapi.InlineKeyboardButton
 	var pluginButtons []tgbotapi.InlineKeyboardButton
-	// Create buttons for each plugin
 	for _, plugin := range b.plugins {
-		// Use plugin ID as callback data and name as button text
+		if !pluginAllowed(role, plugin) {
+			continue
+		}
 		pluginButtons = append(pluginButtons, tgbotapi.NewInlineKeyboardButtonData(plugin.Name, plugin.ID))
 	}
-	// Create 2-column grid for buttons
 	for i, button := range pluginButtons {
 		if i%2 == 0 {
 			rows = append(rows, []tgbotapi.InlineKeyboardButton{})
@@ -332,8 +363,15 @@ func (b *Bot) sendPluginList(chatID int64) {
 
 // handleMessage handles incoming messages
 func (b *Bot) handleMessage(message *tgbotapi.Message) {
-	// Send the main menu with plugin options
-	b.sendMainMenu(message.Chat.ID)
+	if !message.IsCommand() {
+		return
+	}
+	switch message.Command() {
+	case "start":
+		role := getRole(b.db, message.Chat.ID)
+		log.Printf("Chat %d has role %s", message.Chat.ID, role)
+		b.sendMainMenu(message.Chat.ID, role)
+	}
 }
 
 func (b *Bot) handleOptionCallback(callback *tgbotapi.CallbackQuery) {
