@@ -57,10 +57,10 @@ type Config struct {
 
 // Stucture to send to Wingman/core
 type QueueTaskRequest struct {
-	PluginID string `json:"plugin_id"`
-	InvWith  string `json:"inv_with"`
-	InvBy    string `json:"inv_by"`
-	Params   map[string]string
+	PluginID string            `json:"plugin_id"`
+	InvWith  string            `json:"inv_with"`
+	InvBy    string            `json:"inv_by"`
+	Params   map[string]string `json:"params"`
 }
 
 // Bot holds the telegram bot state
@@ -275,8 +275,7 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 	defer r.Body.Close()
 	var req SendMsgRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("Invalid JSON")
-		log.Printf(string(body))
+		log.Printf("Invalid JSON: %v (body=%s)", err, string(body))
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -601,7 +600,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load bot token: %v", err)
 	}
-	log.Println("token is ", token)
+
 	// Create bot instance
 	bot, err := newBot(token, config.Port)
 	if err != nil {
