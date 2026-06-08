@@ -251,7 +251,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 			if err != nil {
 				log.Printf("error updating result_sent_at for task %d: %v", id, err)
 			} else {
-				log.Printf("successfully sent telegram result for task %d", id)
+				log.Printf("updated result_sent_at successfully %d", id)
 			}
 			continue
 		}

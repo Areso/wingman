@@ -139,28 +139,40 @@ func getDefaultChatID(db *sql.DB) (int64, error) {
 // loadBotToken loads the bot token from systemd credentials
 func loadBotToken() (string, error) {
 	// Try to load from systemd credential
-	credPath := "/Users/areso/.wingman/tg"
-	if _, err := os.Stat(credPath); err == nil {
-		data, err := os.ReadFile(credPath)
+	//credPath := "/Users/areso/.wingman/tg"
+	//if _, err := os.Stat(credPath); err == nil {
+	//	data, err := os.ReadFile(credPath)
+	//	if err != nil {
+	//			return "", fmt.Errorf("failed to read systemd credential: %w", err)
+	//	}
+	//	return strings.TrimSpace(string(data)), nil
+	//}
+
+	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
+	if secretsDir == "" {
+		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return "", fmt.Errorf("failed to read systemd credential: %w", err)
+			panic(err)
 		}
-		return strings.TrimSpace(string(data)), nil
+		secretsDir = filepath.Join(homeDir, ".wingman")
 	}
+	fmt.Println("Secrets directory:", secretsDir)
 
-	// Fallback to reading from config.toml
-	if _, err := os.Stat("config.toml"); err == nil {
-		// This would require a TOML parser - for now, return error
-		return "", fmt.Errorf("config.toml not supported for token, use systemd credentials")
+	secretPath := filepath.Join(secretsDir, "channels/telegram")
+	fmt.Println("Telegram secret path directory:", secretPath)
+	secretBytes, err := os.ReadFile(secretPath)
+	if err != nil {
+		// Fallback to environment variable
+		token := os.Getenv("TELEGRAM_BOT_TOKEN")
+		if token != "" {
+			return token, nil
+		} else {
+			fmt.Errorf("Cannot load secret, exiting %w", err)
+			panic(err)
+		}
 	}
-
-	// Fallback to environment variable
-	token := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if token != "" {
-		return token, nil
-	}
-
-	return "", fmt.Errorf("no bot token found in systemd credentials, config.toml, or environment variables")
+	token := string(secretBytes)
+	return token, nil
 }
 
 // loadPlugins reads and filters plugins from plugins directory
@@ -589,7 +601,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load bot token: %v", err)
 	}
-
+	log.Println("token is ", token)
 	// Create bot instance
 	bot, err := newBot(token, config.Port)
 	if err != nil {
