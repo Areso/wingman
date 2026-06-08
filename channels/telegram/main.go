@@ -59,7 +59,7 @@ type Config struct {
 type QueueTaskRequest struct {
 	PluginID string `json:"plugin_id"`
 	InvWith  string `json:"inv_with"`
-	InvBy    string `json:"inv_with"`
+	InvBy    string `json:"inv_by"`
 	Params   map[string]string
 }
 
@@ -425,7 +425,7 @@ func (b *Bot) handleOptionCallback(callback *tgbotapi.CallbackQuery) {
 	b.api.Send(msg)
 
 	chatIDStr := strconv.FormatInt(callback.Message.Chat.ID, 10)
-	if err := b.invokePlugin(pluginID, req, "comms_tg_menu", chatIDStr); err != nil {
+	if err := b.invokePlugin(pluginID, req, "channels_tg_menu", chatIDStr); err != nil {
 		log.Printf("Error invoking plugin %s: %v", pluginID, err)
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
 		b.api.Send(msg)
@@ -474,7 +474,7 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 	// Make HTTP request to wingman to invoke the plugin
 	chatIDStr := strconv.FormatInt(callback.Message.Chat.ID, 10)
-	if err := b.invokePlugin(pluginID, req, "comms_tg_menu", chatIDStr); err != nil {
+	if err := b.invokePlugin(pluginID, req, "channels_tg_menu", chatIDStr); err != nil {
 		log.Printf("Error invoking plugin %s: %v", pluginID, err)
 		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
 		b.api.Send(msg)

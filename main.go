@@ -226,7 +226,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
 			continue
 		}
-		if invokedWith == "comms_tg_menu" {
+		if invokedWith == "channels_tg_menu" {
 			log.Printf("invoked with telegram dialog")
 			// send to tg
 			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
@@ -245,7 +245,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 			}
 		} else {
 			// Skip non-telegram tasks
-			log.Printf("invoked with NON telegram dialog")
+			log.Printf("invoked with _NON_ telegram dialog")
 			now := time.Now().UTC().Unix()
 			_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
 			if err != nil {
@@ -353,6 +353,7 @@ func main() {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
+		log.Printf("/queue_add_task req: %+v", req)
 
 		p, ok := pluginsMap[req.PluginID]
 		if !ok {
