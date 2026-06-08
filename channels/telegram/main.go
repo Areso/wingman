@@ -269,8 +269,16 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// send message to a telegram chat
-	msg := tgbotapi.NewMessage(req.ChatID, req.Message)
-	b.api.Send(msg)
+	text := req.Message
+	if strings.TrimSpace(text) == "" {
+		text = "(plugin produced no output)"
+	}
+	msg := tgbotapi.NewMessage(req.ChatID, text)
+	if _, err := b.api.Send(msg); err != nil {
+		log.Printf("failed to send telegram message to chat %d: %v", req.ChatID, err)
+		http.Error(w, fmt.Sprintf("failed to send teelgram message: %v", err), http.StatusInternalServerError)
+		return
+	}
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Message sent successfully"))
