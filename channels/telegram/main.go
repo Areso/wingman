@@ -163,7 +163,7 @@ func loadBotToken() (string, error) {
 	secretBytes, err := os.ReadFile(secretPath)
 	if err != nil {
 		// Fallback to environment variable
-		token := os.Getenv("TELEGRAM_BOT_TOKEN")
+		token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
 		if token != "" {
 			return token, nil
 		} else {
@@ -171,7 +171,7 @@ func loadBotToken() (string, error) {
 			panic(err)
 		}
 	}
-	token := string(secretBytes)
+	token := strings.TrimSpace(string(secretBytes))
 	return token, nil
 }
 
