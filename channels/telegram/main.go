@@ -55,6 +55,14 @@ type Config struct {
 	Port     int    `toml:"port"`
 }
 
+// Stucture to send to Wingman/core
+type QueueTaskRequest struct {
+	PluginID string `json:"plugin_id"`
+	InvWith  string `json:"inv_with"`
+	InvBy    string `json:"inv_with"`
+	Params   map[string]string
+}
+
 // Bot holds the telegram bot state
 type Bot struct {
 	api     *tgbotapi.BotAPI
@@ -483,10 +491,12 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_wit
 		wingman_config.Port = 8089
 	}
 	// Queue the task on the wingman core
-	queueReq := map[string]string{
-		"plugin_id": pluginID,
-		"inv_with":  inv_with,
-		"inv_by":    inv_by}
+	queueReq := QueueTaskRequest{
+		PluginID: pluginID,
+		InvWith:  inv_with,
+		InvBy:    inv_by,
+		Params:   req.Params,
+	}
 	jsonData, err := json.Marshal(queueReq)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)

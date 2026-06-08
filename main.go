@@ -183,7 +183,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		}
 		fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
 		if option := params["option"]; option != "" {
-			fullCommand = fmt.Sprint("%s %s", fullCommand, shellQuote(option))
+			fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
 		}
 		cmd := exec.Command("bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
@@ -240,7 +240,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 					log.Printf("successfully sent telegram result for task %d", id)
 				}
 			} else {
-				log.Printf("the call to comms/telegram/ service returned error")
+				log.Printf("the call to channels/telegram/ service returned error")
 				continue
 			}
 		} else {
