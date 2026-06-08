@@ -63,3 +63,7 @@ test default:
 ```
 curl -X POST localhost:8085/send_message_to_default -d '{"message":"privet"}'
 ```
+```
+export WINGMAN_SECRETS_DIR=~/.wingman
+.telegram
+```
