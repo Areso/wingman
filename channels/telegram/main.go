@@ -138,16 +138,6 @@ func getDefaultChatID(db *sql.DB) (int64, error) {
 
 // loadBotToken loads the bot token from systemd credentials
 func loadBotToken() (string, error) {
-	// Try to load from systemd credential
-	//credPath := "/Users/areso/.wingman/tg"
-	//if _, err := os.Stat(credPath); err == nil {
-	//	data, err := os.ReadFile(credPath)
-	//	if err != nil {
-	//			return "", fmt.Errorf("failed to read systemd credential: %w", err)
-	//	}
-	//	return strings.TrimSpace(string(data)), nil
-	//}
-
 	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
 	if secretsDir == "" {
 		homeDir, err := os.UserHomeDir()
@@ -167,7 +157,7 @@ func loadBotToken() (string, error) {
 		if token != "" {
 			return token, nil
 		} else {
-			fmt.Errorf("Cannot load secret, exiting %w", err)
+			log.Fatalf("Cannot load secret, exiting %v", err)
 			panic(err)
 		}
 	}
@@ -312,8 +302,7 @@ func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request)
 	defer r.Body.Close()
 	var req SendMsgRequestToDefault
 	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("Invalid JSON")
-		log.Printf(string(body))
+		log.Printf("Invalid JSON: %v (body=%s)", err, string(body))
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
