@@ -1,0 +1,6 @@
+{
+    "id":"telegram",
+    "address":"127.0.0.1",
+    "port":8085,
+    "endpoint":"send_message_to_chat_id"
+}
