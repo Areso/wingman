@@ -328,10 +328,8 @@ func sendResultToChannel(channel *Channel, invokedByID int64, result string, tas
 }
 
 type Config struct {
-	Host             string `toml:"host"`
-	Port             int    `toml:"port"`
-	CommTelegramHost string `toml:"comm_telegram_host"`
-	CommTelegramPort int    `toml:"comm_telegram_port"`
+	Host string `toml:"host"`
+	Port int    `toml:"port"`
 }
 
 func main() {
@@ -341,8 +339,6 @@ func main() {
 		log.Printf("Failed to read config.toml, using defaults: %v", err)
 		config.Host = "127.0.0.1"
 		config.Port = 8089
-		config.CommTelegramHost = "127.0.0.1"
-		config.CommTelegramPort = 8085
 	}
 
 	db, err := initDB("wingman.db")
