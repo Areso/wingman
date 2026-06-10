@@ -30,6 +30,14 @@ type Plugin struct {
 	Dir            string
 }
 
+type Channel struct {
+	ID       string `json:"id"`
+	Address  string `json:"address"`
+	Port     int
+	Endpoint string `json:"endpoint"`
+	Dir      string
+}
+
 func loadPlugins(dir string) ([]Plugin, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -56,6 +64,33 @@ func loadPlugins(dir string) ([]Plugin, error) {
 		plugins = append(plugins, p)
 	}
 	return plugins, nil
+}
+
+func loadChannels(dir string) ([]Channel, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var channels []Channel
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name(), "channel.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("skipping %s: %v", entry.Name(), err)
+			continue
+		}
+		var p Channel
+		if err := json.Unmarshal(data, &p); err != nil {
+			log.Printf("skipping %s: %v", entry.Name(), err)
+			continue
+		}
+		p.Dir = filepath.Join(dir, entry.Name())
+		channels = append(channels, p)
+	}
+	return channels, nil
 }
 
 func isCroned(p Plugin) bool {
@@ -204,7 +239,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 	}
 }
 
-func processFinishedTasks(db *sql.DB, config *Config) {
+func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channel) {
 	for range time.NewTicker(time.Second * 5).C {
 		var id int64
 		var invokedWith string
@@ -230,7 +265,8 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 			log.Printf("invoked with telegram dialog")
 			// send to tg
 			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
-			tg_call_res := sendResultToTelegram(db, config, invokedByID_int, result, id)
+			c, _ := channels["telegram"]
+			tg_call_res := sendResultToChannel(&c, invokedByID_int, result, id)
 			if tg_call_res == 0 {
 				now := time.Now().UTC().Unix()
 				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
@@ -258,7 +294,7 @@ func processFinishedTasks(db *sql.DB, config *Config) {
 	}
 }
 
-func sendResultToTelegram(db *sql.DB, config *Config, invokedByID int64, result string, taskID int64) int {
+func sendResultToChannel(channel *Channel, invokedByID int64, result string, taskID int64) int {
 	// Prepare request to send message via telegram
 	req := map[string]interface{}{
 		"chat_id": invokedByID,
@@ -269,7 +305,7 @@ func sendResultToTelegram(db *sql.DB, config *Config, invokedByID int64, result 
 		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
 		return -1
 	}
-	url := fmt.Sprintf("http://%s:%d/send_message_to_chat_id", config.CommTelegramHost, config.CommTelegramPort)
+	url := fmt.Sprintf("http://%s:%d/send_message_to_chat_id", channel.Address, channel.Port)
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
@@ -319,20 +355,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load plugins: %v", err)
 	}
-
 	log.Printf("loaded %d plugin(s)", len(plugins))
-
 	// Create plugins map for easy lookup
 	pluginsMap := make(map[string]Plugin)
 	for _, p := range plugins {
 		pluginsMap[p.ID] = p
 	}
 
+	channels, err := loadChannels("channels")
+	if err != nil {
+		log.Fatalf("failed to load channels: %v", err)
+	}
+	log.Printf("loaded %d channel(s)", len(channels))
+	// Create channels map for easy lookup
+	channelsMap := make(map[string]Channel)
+	for _, c := range channels {
+		channelsMap[c.ID] = c
+	}
+
 	// Start the queued task processor
 	go processQueuedTasks(db, pluginsMap)
 
 	// Start the telegram results sender
-	go processFinishedTasks(db, &config)
+	go processFinishedTasks(db, &config, channelsMap)
 
 	// Set up HTTP endpoints
 
