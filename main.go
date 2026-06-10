@@ -305,7 +305,7 @@ func sendResultToChannel(channel *Channel, invokedByID int64, result string, tas
 		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
 		return -1
 	}
-	url := fmt.Sprintf("http://%s:%d/send_message_to_chat_id", channel.Address, channel.Port)
+	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, channel.Endpoint)
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
