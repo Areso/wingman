@@ -31,11 +31,12 @@ type Plugin struct {
 }
 
 type Channel struct {
-	ID       string `json:"id"`
-	Address  string `json:"address"`
-	Port     int
-	Endpoint string `json:"endpoint"`
-	Dir      string
+	ID            string `json:"id"`
+	Address       string `json:"address"`
+	Port          int
+	Endpoint      string `json:"endpoint"`
+	EndpointToDef string `json:"endpoint_to_default"`
+	Dir           string
 }
 
 func loadPlugins(dir string) ([]Plugin, error) {
