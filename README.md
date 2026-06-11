@@ -47,5 +47,23 @@ INSERT INTO wingman_settings (s_key, s_value) VALUES ('default_channel', 'telegr
 against the `telegram.db` in `channels/telegram` folder:
 ```
 sqlite3 telegram.db
-INSERT INTO known_ids (chat_id, level, is_default) VALUES (<CHANGENUMBER>, "owner", 1);
+INSERT INTO known_ids (chat_id, role, is_default) VALUES (<CHANGENUMBER>, "owner", 1);
 ```
+
+
+SELECT s_value FROM wingman_settings WHERE s_key='default_channel';
+
+
+		err := db.QueryRow(`
+			SELECT s_value 
+			FROM wingman_settings 
+			WHERE s_key='default_channel';
+		`).Scan(&id, &invokedWith, &invokedByID, &result)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// No tasks ready to process right now; safely skip
+				continue
+			}
+			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
+			continue
+		}
