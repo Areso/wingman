@@ -29,8 +29,8 @@ cron    -> queue -> plugin process -> stdout&stderr of a plugin -> channel
 
 ## Security model
 1) Because AI lives only at the edges, system is harder to comprosize at whole.
-2) Because the plugins, where AI could be invoked, actually has only stdout/stderr, it prevents most of the attacks through the prompt injection or a model bisheaving
-3) so far, everything runs locally and listens only the localhost (127.0.0.1)) and thus don't have authentication at the moment
+2) Because the plugins, where AI could be invoked, actually has only stdout/stderr, it prevents most of the attacks through the prompt injection or a model bisheaving, especially between the Core and the Plugins/Channels
+3) so far, the Core and the channels/telegram runs locally and listens only the localhost (127.0.0.1, from the config.toml and from the defaults inside the code), and thus they don't have authentication at the moment
 
 ## Routing logic
 1) direct reply: if invoked_with matches a known channel id -> sendResult (with recipient)
