@@ -264,7 +264,7 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 		}
 		channel_to_use_obj, ok := channels[invokedWith]
 		channel_to_use := ""
-		is_default := 0
+		useDefaultRecipient := false
 		if !ok {
 			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
 			var default_channel string
@@ -281,7 +281,7 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 				channel_to_use = "devnull"
 			} else {
 				channel_to_use = default_channel
-				is_default = 1
+				useDefaultRecipient = true
 			}
 		} else {
 			log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
@@ -306,7 +306,7 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 			}
 			log.Printf("is_default flag value is %d", is_default)
 			var tg_call_res int
-			if is_default == 0 {
+			if useDefaultRecipient == false {
 				tg_call_res = sendResultToChannel(&c, invokedByID_int, result, id)
 			} else {
 				tg_call_res = sendResultToDefault(&c, result, id)
