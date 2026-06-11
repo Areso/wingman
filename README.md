@@ -19,10 +19,10 @@ cron    -> queue -> plugin process -> stdout&stderr of a plugin -> channel
 - channels bridge: Telegram, more to come
 - plugins: a weather plugin, more to come
 
-## Cost to run:
-- Wingman, cost = f(actual invocations of AI-enabled plugins)
+## Cost to run in tokens:
+- Wingman,  cost = f(actual invocations of AI-enabled plugins)
 - OpenClaw, cost = f(time) ^1 + f(actual invocations)
-- Hermes, cost = f(actual invocations * system prompt ^2 + ever-growing history as the AI-assistant context)
+- Hermes,   cost = f(actual invocations * (system prompt ^2 + ever-growing history as the AI-assistant context))
 
 ^1 OpenClaw tends to spend millions of tokens just checking whether it has some job to do or not, while Wingman does the polling through SELECT * FROM tasks_queued.  
 ^2 System Prompt for Hermes is about 14k tokens big. Every invocation uses the system prompt + evergrowing history context  
