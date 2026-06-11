@@ -304,12 +304,12 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 				}
 				continue
 			}
-			log.Printf("is_default flag value is %d", is_default)
+			log.Printf("is_default flag value is %t", useDefaultRecipient)
 			var tg_call_res int
 			if useDefaultRecipient == false {
-				tg_call_res = sendResultToChannel(&c, invokedByID_int, result, id)
+				tg_call_res = sendResult(&c, &invokedByID_int, result, id)
 			} else {
-				tg_call_res = sendResultToDefault(&c, result, id)
+				tg_call_res = sendResult(&c, nil, result, id)
 			}
 			if tg_call_res == 0 {
 				now := time.Now().UTC().Unix()
@@ -339,52 +339,23 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 	}
 }
 
-func sendResultToChannel(channel *Channel, invokedByID int64, result string, taskID int64) int {
+func sendResult(channel *Channel, recipient *int64, result string, taskID int64) int {
 	// Prepare request to send message via telegram
 	req := map[string]interface{}{
-		"chat_id": invokedByID,
 		"message": result,
 	}
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
-		return -1
+	endpoint := channel.EndpointToDef
+	if recipient != nil {
+		req["chat_id"] = *recipient
+		endpoint = channel.Endpoint
 	}
-	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, channel.Endpoint)
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
-	if err != nil {
-		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
-		return -1
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		log.Printf("error sending telegram message for task %d: %v", taskID, err)
-		return -1
-	}
-	resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return 0
-	} else {
-		log.Printf("telegram API returned status %d for task %d", resp.StatusCode, taskID)
-		return -1
-	}
-}
 
-func sendResultToDefault(channel *Channel, result string, taskID int64) int {
-	// Prepare request to send message via telegram
-	// it doesn't have chat_id
-	req := map[string]interface{}{
-		"message": result,
-	}
 	jsonData, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
 		return -1
 	}
-	// the only real difference channel.EndpointToDef instead of channel.Endpoint
-	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, channel.EndpointToDef)
+	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, endpoint)
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
@@ -394,14 +365,14 @@ func sendResultToDefault(channel *Channel, result string, taskID int64) int {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		log.Printf("error sending telegram message for task %d: %v", taskID, err)
+		log.Printf("error sending message to the channel for task %d: %v", taskID, err)
 		return -1
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		return 0
 	} else {
-		log.Printf("telegram API returned status %d for task %d", resp.StatusCode, taskID)
+		log.Printf("channel API returned status %d for task %d", resp.StatusCode, taskID)
 		return -1
 	}
 }
