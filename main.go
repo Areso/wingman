@@ -304,7 +304,7 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 				}
 				continue
 			}
-			log.Printf("is_default flag value is %t", useDefaultRecipient)
+			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
 			var tg_call_res int
 			if useDefaultRecipient == false {
 				tg_call_res = sendResult(&c, &invokedByID_int, result, id)
@@ -340,7 +340,6 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 }
 
 func sendResult(channel *Channel, recipient *int64, result string, taskID int64) int {
-	// Prepare request to send message via telegram
 	req := map[string]interface{}{
 		"message": result,
 	}
