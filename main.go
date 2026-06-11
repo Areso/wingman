@@ -275,9 +275,9 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 			if err != nil {
 				if err == sql.ErrNoRows {
 					log.Printf("There is no record in t wingman_settings for s_key is default_channel: %v", err)
-					channel_to_use = "devnull"
+				} else {
+					log.Printf("Can't select default_channel from t wingman_settings: %v", err)
 				}
-				log.Printf("Can't select default_channel from t wingman_settings: %v", err)
 				channel_to_use = "devnull"
 			} else {
 				channel_to_use = default_channel
@@ -290,7 +290,20 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 		if channel_to_use != "devnull" {
 			log.Printf("channel_to_use is %s", channel_to_use)
 			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
-			c, _ := channels[channel_to_use]
+			c, ok := channels[channel_to_use]
+			if !ok {
+				log.Printf("we have no real target to send the result to, including no default channel defined")
+				now := time.Now().UTC().Unix()
+				// otherwise we would get this exactly task indefinetly
+				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
+				if err != nil {
+					log.Printf("error updating result_sent_at for task %d: %v", id, err)
+				} else {
+					// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
+					log.Printf("updated result_sent_at successfully %d", id)
+				}
+				continue
+			}
 			log.Printf("is_default flag value is %d", is_default)
 			var tg_call_res int
 			if is_default == 0 {
