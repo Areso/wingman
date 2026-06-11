@@ -262,12 +262,42 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
 			continue
 		}
-		if invokedWith == "channels_tg_menu" {
-			log.Printf("invoked with telegram dialog")
-			// send to tg
+		channel_to_use_obj, ok := channels[invokedWith]
+		channel_to_use := ""
+		is_default := 0
+		if !ok {
+			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
+			var default_channel string
+			err := db.QueryRow(`
+				SELECT s_value FROM wingman_settings 
+				WHERE s_key='default_channel';
+			`).Scan(&default_channel)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					log.Printf("There is no record in t wingman_settings for s_key is default_channel: %v", err)
+					channel_to_use = "devnull"
+				}
+				log.Printf("Can't select default_channel from t wingman_settings: %v", err)
+				channel_to_use = "devnull"
+			} else {
+				channel_to_use = default_channel
+				is_default = 1
+			}
+		} else {
+			log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
+			channel_to_use = channel_to_use_obj.ID
+		}
+		if channel_to_use != "devnull" {
+			log.Printf("channel_to_use is %s", channel_to_use)
 			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
-			c, _ := channels["telegram"]
-			tg_call_res := sendResultToChannel(&c, invokedByID_int, result, id)
+			c, _ := channels[channel_to_use]
+			log.Printf("is_default flag value is %d", is_default)
+			var tg_call_res int
+			if is_default == 0 {
+				tg_call_res = sendResultToChannel(&c, invokedByID_int, result, id)
+			} else {
+				tg_call_res = sendResultToDefault(&c, result, id)
+			}
 			if tg_call_res == 0 {
 				now := time.Now().UTC().Unix()
 				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
@@ -281,13 +311,14 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 				continue
 			}
 		} else {
-			// Skip non-telegram tasks
-			log.Printf("invoked with _NON_ telegram dialog")
+			log.Printf("we have no real target to send the result to, including no default channel defined")
 			now := time.Now().UTC().Unix()
+			// otherwise we would get this exactly task indefinetly
 			_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
 			if err != nil {
 				log.Printf("error updating result_sent_at for task %d: %v", id, err)
 			} else {
+				// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
 				log.Printf("updated result_sent_at successfully %d", id)
 			}
 			continue
@@ -307,6 +338,40 @@ func sendResultToChannel(channel *Channel, invokedByID int64, result string, tas
 		return -1
 	}
 	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, channel.Endpoint)
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
+		return -1
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		log.Printf("error sending telegram message for task %d: %v", taskID, err)
+		return -1
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return 0
+	} else {
+		log.Printf("telegram API returned status %d for task %d", resp.StatusCode, taskID)
+		return -1
+	}
+}
+
+func sendResultToDefault(channel *Channel, result string, taskID int64) int {
+	// Prepare request to send message via telegram
+	// it doesn't have chat_id
+	req := map[string]interface{}{
+		"message": result,
+	}
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
+		return -1
+	}
+	// the only real difference channel.EndpointToDef instead of channel.Endpoint
+	url := fmt.Sprintf("http://%s:%d/%s", channel.Address, channel.Port, channel.EndpointToDef)
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		log.Printf("error creating HTTP request for task %d: %v", taskID, err)
