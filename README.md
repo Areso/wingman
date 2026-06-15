@@ -9,9 +9,14 @@ While it was inspired by OpenClaw and Hermes, it is different.
 3) Plugins provide results as stdout&stderr to the Core, where Core updates tasks with their results
 4) The Core sends the result to user through the selected channel (for tasks with cron) or through the channel of the task origin
 
+Lifecycle:  
 ```
-channel -> queue -> plugin process -> stdout&stderr of a plugin -> channel
-cron    -> queue -> plugin process -> stdout&stderr of a plugin -> channel
+channel ─┐
+         ├─> task creator(Core) -> queue of tasks (SQLite) ─> 
+cron    ─┘
+
+-> task invoker(Core) ->plugin subprocess ─> stdout/stderr ->
+-> enrich task with result (SQLite) -> channel
 ```
 
 ## Wingman includes:

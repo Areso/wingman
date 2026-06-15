@@ -1,69 +1,37 @@
-# Telegram Bot for Wingman
+# Telegram bot for Wingman
 
-This is a Telegram bot client that integrates with the wingman system to provide plugin execution via Telegram interface.
-
-## Features
-
-- Uses systemd LoadCredential mechanism for reading bot token
-- Reads plugins from `plugins/*` directory
-- Registers only plugins with `ad_hoc: true`
-- Provides menu interface with registered plugins
-- Invokes plugins via HTTP endpoint at `127.0.0.1:8080/invoke_plugin`
+This is a communication channel for Wingman  
+It exposes ad-hoc plugins for owner, registered users, and guests of Wingman installation  
+It provides a menu of available plugins accoding to a user's known role
 
 ## Setup
+0. make sure you already has ~/.wingman directory ("WINGMAN_SECRETS_DIR")
+1. create directory ~/.wingman/channels
+2. echo "YOUR_BOT_TOKEN_HERE" > ~/.wignman/channels/telegram
 
-### 1. Systemd Credential Setup
+## Smoke test
+```
+export WINGMAN_SECRETS_DIR=~/.wingman
+.telegram
+```
+or
+```
+export WINGMAN_SECRETS_DIR=~/.wingman
+go run channels/telegram/main.go
+```
 
-Create a systemd credential file:
+## Setup continues
 ```
-sudo mkdir -p /run/credentials/wingman.service
-sudo echo "YOUR_BOT_TOKEN_HERE" > /run/credentials/wingman.service/bot_token
-```
-
-### 2. Run the Bot
+sqlite3 telegram.db
+INSERT INTO known_ids (chat_id,role,is_default) VALUES (<YOUR CHAT ID WITH THE BOT>,'owner',1);
 
 ```
-cd /path/to/wingman
-go run comms/telegram/main.go
-```
+This is needed to have "owner" privileges and get access to all ad-hoc plug-ins.  
+Please note, there should be only ONE user with 'owner' value and is_default 1 value.  
+Other supported roles are: "guest" (but you don't need to add guests to the database) and "user" (these should be added with <CHAT_ID>,'user',0 values) 
 
 ## Usage
 
 - Send `/start` or `/help` to see the plugin menu
 - Click on plugin buttons to execute them
 - Send `/plugins` to see a list of available plugins
-
-## Plugin Structure
-
-Plugins in the `plugins/` directory must have a `plugin.json` file with at least:
-```json
-{
-  "id": "unique_plugin_id",
-  "name": "Plugin Name",
-  "adhoc": "true",
-  "invocation_with": "command",
-  "invocation_file": "script.sh"
-}
-```
-
-## to run (working_dir: wingman/comms/telegram %)
-```
-go run main.go
-
-
-curl -X POST localhost:8085/send_message_to_chat_id \
--d '{"chat_id":XX,"message":"privet"}'
-
-curl -X POST localhost:8085/invoke_plugin \
--d '{"id":"check_mysql_port_open_on_localhost","params":{}}'
-
-```
-
-test default:
-```
-curl -X POST localhost:8085/send_message_to_default -d '{"message":"privet"}'
-```
-```
-export WINGMAN_SECRETS_DIR=~/.wingman
-.telegram
-```
