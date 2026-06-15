@@ -68,11 +68,12 @@ type Bot struct {
 	api     *tgbotapi.BotAPI
 	plugins map[string]*Plugin
 	port    int
+	host    string
 	db      *sql.DB
 }
 
 // newBot creates a new bot instance
-func newBot(token string, port int) (*Bot, error) {
+func newBot(token string, port int, host string) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot: %w", err)
@@ -82,6 +83,7 @@ func newBot(token string, port int) (*Bot, error) {
 		api:     api,
 		plugins: make(map[string]*Plugin),
 		port:    port,
+		host:    host,
 	}, nil
 }
 
@@ -226,8 +228,8 @@ func (b *Bot) start() error {
 	// Set up HTTP endpoint for sending a message to the default chat
 	http.HandleFunc("/send_message_to_default", b.handleSendMessageToDefault)
 	go func() {
-		log.Printf("Starting HTTP server on :%d", b.port)
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", b.port), nil); err != nil {
+		log.Printf("Starting HTTP server on %s:%d", b.host, b.port)
+		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", b.host, b.port), nil); err != nil {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()
@@ -591,7 +593,7 @@ func main() {
 	}
 
 	// Create bot instance
-	bot, err := newBot(token, config.Port)
+	bot, err := newBot(token, config.Port, config.Host)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
