@@ -28,8 +28,9 @@ INSERT INTO known_ids (chat_id,role,is_default) VALUES (<YOUR CHAT ID WITH THE B
 ```
 This is needed to have "owner" privileges and get access to all ad-hoc plug-ins.  
 Please note, there should be only ONE user with 'owner' value and is_default 1 value.  
-Other supported roles are: "guest" (but you don't need to add guests to the database) and "user" (these should be added with <CHAT_ID>,'user',0 values) 
+Other supported roles are: "guest" (but you don't need to add guests to the database) and "user" (these should be added with <CHAT_ID>,'user',0 values)   
 
+Finally, check `config.toml` for host and port settings both for the channel/telegram and Wingman (Core)
 ## Usage
 
 - Send `/start` or `/help` to see the plugin menu
