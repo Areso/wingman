@@ -1,7 +1,8 @@
 from pathlib import Path
 import sys
 import requests
-
+import os
+import toml
 def openweather_location(option):
     if not option:
         return "Limassol,cy"
@@ -14,7 +15,13 @@ def openweather_location(option):
 
 def get_weather():
     location = openweather_location(sys.argv[1] if len(sys.argv)> 1 else "")
-    secret_path = Path("/Users/areso/.wingman/weather")
+    script_dir  = os.path.dirname(os.path.abspath(__file__))
+    data        = toml.load(script_dir+"/config.toml")
+    secret_path = data["weather_plugin"]["secret_path"]
+    if "~" in secret_path:
+        secret_path = Path(secret_path).expanduser()
+    else:
+        secret_path = Path(secret_path)
     try:
         api_key = secret_path.read_text().strip()
     except FileNotFoundError:

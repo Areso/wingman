@@ -1,0 +1,2 @@
+[weather_plugin]
+secret_path = "~/.wingman/plugins/weather"
