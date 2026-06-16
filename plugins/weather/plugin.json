@@ -3,6 +3,8 @@
     "name":"Get weather forecast for next 18hrs",
     "invocation_with":"source .venv/bin/activate; python3",
     "invocation_file":"weather.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 45,
     "options":["Cyprus, Limassol","Cyprus, Paphos","Cyprus, Larnaca", "Cyprus, Nicosia"],
     "adhoc":"true",
     "crone":"true",

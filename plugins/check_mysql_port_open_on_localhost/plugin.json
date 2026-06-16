@@ -3,6 +3,8 @@
     "name":"Check MySQL port open on localhost",
     "invocation_with":"sh",
     "invocation_file":"app.sh",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 45,
     "options":[],
     "adhoc":"true",
     "crone":"true",

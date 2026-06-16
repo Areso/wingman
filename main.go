@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -21,14 +22,15 @@ import (
 )
 
 type Plugin struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	InvocationWith string `json:"invocation_with"`
-	InvocationFile string `json:"invocation_file"`
-	Adhoc          string `json:"adhoc"`
-	Crone          string `json:"crone"`
-	CroneTime      string `json:"crone_time"`
-	Dir            string
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	InvocationWith     string `json:"invocation_with"`
+	InvocationFile     string `json:"invocation_file"`
+	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
+	Adhoc              string `json:"adhoc"`
+	Crone              string `json:"crone"`
+	CroneTime          string `json:"crone_time"`
+	Dir                string
 }
 
 type Channel struct {
@@ -223,7 +225,12 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		if option := params["option"]; option != "" {
 			fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
 		}
-		cmd := exec.Command("bash", "-c", fullCommand)
+		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
+		log.Printf("timeout is %v", timeout)
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel() // Always call cancel to release resources!
+		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -232,17 +239,22 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		runErr := cmd.Run()
 		rc := 0
 		if runErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(runErr, &exitErr) {
-				// The command finished with a non-zero exit code
-				rc = exitErr.ExitCode()
-				log.Printf("Command failed with RC: %d", rc)
+			// 6. Check if the error was caused by a timeout
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.Printf("Command timed out after %v", timeout)
+				rc = -1 // RC for timeout (for now)
 			} else {
-				// The command failed to start, or another issue occurred
-				log.Printf("Command failed to execute: %v", runErr)
+				var exitErr *exec.ExitError
+				if errors.As(runErr, &exitErr) {
+					// The command finished with a non-zero exit code
+					rc = exitErr.ExitCode()
+					log.Printf("Command failed with RC: %d", rc)
+				} else {
+					// The command failed to start, or another issue occurred
+					log.Printf("Command failed to execute: %v", runErr)
+				}
 			}
 		} else {
-			// Command succeeded (RC is 0)
 			log.Println("Command finished successfully")
 		}
 		finishTime := time.Now().UTC().Unix()
