@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -132,6 +133,7 @@ func initDB(path string) (*sql.DB, error) {
 			params TEXT,
 			finished_at INTEGER,
 			result TEXT,
+			rc INTEGER,
 			result_sent_at INTEGER
 		)
 	`)
@@ -228,9 +230,30 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		cmd.Stderr = &stderr
 		log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
 		runErr := cmd.Run()
+		rc := 0
+		if runErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				// The command finished with a non-zero exit code
+				rc = exitErr.ExitCode()
+				log.Printf("Command failed with RC: %d", rc)
+			} else {
+				// The command failed to start, or another issue occurred
+				log.Printf("Command failed to execute: %v", runErr)
+			}
+		} else {
+			// Command succeeded (RC is 0)
+			log.Println("Command finished successfully")
+		}
 		finishTime := time.Now().UTC().Unix()
 		result := stdout.String() + "\n" + stderr.String()
-		_, err = db.Exec("UPDATE tasks_queued SET finished_at = ?, result = ? WHERE id = ?", finishTime, result, id)
+		query := `
+		UPDATE tasks_queued 
+		SET finished_at = ?, 
+			result = ?,
+			rc     = ? 
+		WHERE id = ?`
+		_, err = db.Exec(query, finishTime, result, rc, id)
 		if err != nil {
 			log.Printf("error updating finished_at for task %d: %v", id, err)
 		}
