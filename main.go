@@ -33,7 +33,7 @@ type Plugin struct {
 type Channel struct {
 	ID            string `json:"id"`
 	Address       string `json:"address"`
-	Port          int
+	Port          int    `json:"port"`
 	Endpoint      string `json:"endpoint"`
 	EndpointToDef string `json:"endpoint_to_default"`
 	Dir           string
