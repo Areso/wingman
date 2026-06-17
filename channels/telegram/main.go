@@ -110,6 +110,31 @@ func initTelegramDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// pluginAllowed checks whether a plugin is accessible for the given user role.
+func pluginAllowed(role string, plugin *Plugin) bool {
+	minRole := plugin.MinAllowedRole
+	if minRole == "" {
+		return false
+	}
+	order := map[string]int{"guest": 0, "user": 1, "owner": 2}
+	pluginLevel, pluginOk := order[minRole]
+	userLevel, userOk := order[role]
+	if !pluginOk || !userOk {
+		return false
+	}
+	return userLevel >= pluginLevel
+}
+
+func (b *Bot) authorizePlugin(chatID int64, plugin *Plugin) bool {
+	role := getRole(b.db, chatID)
+	if !pluginAllowed(role, plugin) {
+		log.Printf("RBAC denied: chat %d, role %q -> plugin %q (min role %q)",
+			chatID, role, plugin.ID, plugin.MinAllowedRole)
+		b.api.Send(tgbotapi.NewMessage(chatID, "You are not allowed to run this plugin."))
+	}
+	return true
+}
+
 // getRole returns the role for a given chat_id from the known_ids table.
 func getRole(db *sql.DB, chatID int64) string {
 	var role string
@@ -327,22 +352,6 @@ func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request)
 	w.Write([]byte("Message sent successfully"))
 }
 
-// pluginAllowed checks whether a plugin is accessible for the given user role.
-func pluginAllowed(role string, plugin *Plugin) bool {
-	minRole := plugin.MinAllowedRole
-	if minRole == "" {
-		return false
-	}
-
-	order := map[string]int{"guest": 0, "user": 1, "owner": 2}
-	pluginLevel, pluginOk := order[minRole]
-	userLevel, userOk := order[role]
-	if !pluginOk || !userOk {
-		return false
-	}
-	return userLevel >= pluginLevel
-}
-
 // sendMainMenu sends the main menu with plugin options filtered by role
 func (b *Bot) sendMainMenu(chatID int64, role string) {
 	log.Printf("Chat ID is %d", chatID)
@@ -414,7 +423,9 @@ func (b *Bot) handleOptionCallback(callback *tgbotapi.CallbackQuery) {
 		b.api.Send(msg)
 		return
 	}
-
+	if !b.authorizePlugin(callback.Message.Chat.ID, plugin) {
+		return
+	}
 	selectedOption := plugin.Options[optionIndex]
 	req := PluginInvocationRequest{
 		ID: pluginID,
@@ -458,7 +469,9 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		b.api.Send(msg)
 		return
 	}
-
+	if !b.authorizePlugin(callback.Message.Chat.ID, plugin) {
+		return
+	}
 	if len(plugin.Options) > 0 {
 		b.sendPluginOptions(callback.Message.Chat.ID, plugin)
 		return
@@ -549,9 +562,13 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Find plugin
-	_, exists := b.plugins[req.ID]
+	plugin, exists := b.plugins[req.ID]
 	if !exists {
 		http.Error(w, "Plugin not found", http.StatusNotFound)
+		return
+	}
+	if !pluginAllowed("guest", plugin) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 	// For demonstration purposes, we just log the invocation
