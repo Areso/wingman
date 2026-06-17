@@ -229,7 +229,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		log.Printf("timeout from the plugin.json is %v", timeout)
 		if timeout == 0 {
 			// 0 if plugin.json doesn't have invocation_timeout_s property
-			timeout = 30
+			timeout = 30 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
