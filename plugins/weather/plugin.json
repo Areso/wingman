@@ -7,7 +7,7 @@
     "invocation_timeout_s": 45,
     "options":["Cyprus, Limassol","Cyprus, Paphos","Cyprus, Larnaca", "Cyprus, Nicosia"],
     "adhoc":"true",
-    "crone":"true",
-    "crone_time":"30 7 * * *",
+    "cron":"true",
+    "cron_time":"30 7 * * *",
     "min_allowed_role": "guest"
 }

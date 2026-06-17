@@ -28,8 +28,8 @@ type Plugin struct {
 	InvocationFile     string `json:"invocation_file"`
 	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
 	Adhoc              string `json:"adhoc"`
-	Crone              string `json:"crone"`
-	CroneTime          string `json:"crone_time"`
+	Cron               string `json:"cron"`
+	CronTime           string `json:"cron_time"`
 	Dir                string
 }
 
@@ -98,7 +98,7 @@ func loadChannels(dir string) ([]Channel, error) {
 }
 
 func isCroned(p Plugin) bool {
-	return p.Crone == "true"
+	return p.Cron == "true"
 }
 
 func matchesCron(expr string, t time.Time) bool {
@@ -513,7 +513,7 @@ func main() {
 			if !isCroned(p) {
 				continue
 			}
-			if matchesCron(p.CroneTime, now) {
+			if matchesCron(p.CronTime, now) {
 				if _, err := create_task(db, p, "cron", "n/a", nil); err != nil {
 					log.Printf("error creating cron task for %s: %v", p.ID, err)
 				}

@@ -7,7 +7,7 @@
     "invocation_timeout_s": 45,
     "options":[],
     "adhoc":"true",
-    "crone":"true",
-    "crone_time":"* * * * *",
+    "cron":"true",
+    "cron_time":"* * * * *",
     "min_allowed_role": "guest"
 }
