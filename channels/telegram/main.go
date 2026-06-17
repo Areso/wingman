@@ -25,9 +25,9 @@ type Plugin struct {
 	InvocationWith string   `json:"invocation_with"`
 	InvocationFile string   `json:"invocation_file"`
 	Options        []string `json:"options"`
-	Adhoc          string   `json:"adhoc"`
-	Crone          string   `json:"crone"`
-	CroneTime      string   `json:"crone_time"`
+	Adhoc          bool     `json:"adhoc"`
+	Cron           bool     `json:"crone"`
+	CronTime       string   `json:"crone_time"`
 	Dir            string
 	MinAllowedRole string `json:"min_allowed_role"`
 }
@@ -193,7 +193,7 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 		}
 
 		// Only register plugins with ad_hoc: true
-		if p.Adhoc == "true" {
+		if p.Adhoc == true {
 			p.Dir = filepath.Join(pluginsDir, entry.Name())
 			b.plugins[p.ID] = &p
 			log.Printf("Registered ad_hoc plugin: %s (%s)", p.Name, p.ID)

@@ -6,8 +6,8 @@
     "invocation_type": "sync",
     "invocation_timeout_s": 45,
     "options":[],
-    "adhoc":"true",
-    "cron":"true",
+    "adhoc":true,
+    "cron":true,
     "cron_time":"* * * * *",
     "min_allowed_role": "guest"
 }

@@ -27,8 +27,8 @@ type Plugin struct {
 	InvocationWith     string `json:"invocation_with"`
 	InvocationFile     string `json:"invocation_file"`
 	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
-	Adhoc              string `json:"adhoc"`
-	Cron               string `json:"cron"`
+	Adhoc              bool   `json:"adhoc"`
+	Cron               bool   `json:"cron"`
 	CronTime           string `json:"cron_time"`
 	Dir                string
 }
@@ -98,7 +98,7 @@ func loadChannels(dir string) ([]Channel, error) {
 }
 
 func isCroned(p Plugin) bool {
-	return p.Cron == "true"
+	return p.Cron == true
 }
 
 func matchesCron(expr string, t time.Time) bool {
