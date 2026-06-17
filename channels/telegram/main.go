@@ -131,6 +131,7 @@ func (b *Bot) authorizePlugin(chatID int64, plugin *Plugin) bool {
 		log.Printf("RBAC denied: chat %d, role %q -> plugin %q (min role %q)",
 			chatID, role, plugin.ID, plugin.MinAllowedRole)
 		b.api.Send(tgbotapi.NewMessage(chatID, "You are not allowed to run this plugin."))
+		return false
 	}
 	return true
 }
