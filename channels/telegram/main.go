@@ -26,8 +26,8 @@ type Plugin struct {
 	InvocationFile string   `json:"invocation_file"`
 	Options        []string `json:"options"`
 	Adhoc          bool     `json:"adhoc"`
-	Cron           bool     `json:"crone"`
-	CronTime       string   `json:"crone_time"`
+	Cron           bool     `json:"cron"`
+	CronTime       string   `json:"cron_time"`
 	Dir            string
 	MinAllowedRole string `json:"min_allowed_role"`
 }
