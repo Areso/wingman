@@ -226,10 +226,12 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
 		}
 		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-		log.Printf("timeout is %v", timeout)
-
+		log.Printf("timeout from the plugin.json is %v", timeout)
+		if timeout == 0 {
+			// 0 if plugin.json doesn't have invocation_timeout_s property
+			timeout = 30
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel() // Always call cancel to release resources!
 		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
 		var stdout, stderr bytes.Buffer
@@ -251,6 +253,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 					log.Printf("Command failed with RC: %d", rc)
 				} else {
 					// The command failed to start, or another issue occurred
+					rc = -2 // RC for failed to start (for now)
 					log.Printf("Command failed to execute: %v", runErr)
 				}
 			}
@@ -272,6 +275,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		if runErr != nil {
 			log.Printf("error running queued task %d (plugin %s): %v", id, p.ID, runErr)
 		}
+		cancel() // Always call cancel to release resources!
 	}
 }
 
