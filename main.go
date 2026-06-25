@@ -278,6 +278,17 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		cancel() // Always call cancel to release resources!
 	}
 }
+func markTaskAsSended(db *sql.DB, taskID int64) {
+	now := time.Now().UTC().Unix()
+	// otherwise we would get this exactly task indefinetly
+	_, err := db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, taskID)
+	if err != nil {
+		log.Printf("error updating result_sent_at for task %d: %v", taskID, err)
+	} else {
+		// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
+		log.Printf("updated result_sent_at successfully %d", taskID)
+	}
+}
 
 func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channel) {
 	for range time.NewTicker(time.Second * 5).C {
@@ -285,20 +296,53 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 		var invokedWith string
 		var invokedByID string
 		var result string
+		var rc int32
+
+		var str_send_empty_results string
+		var bl_send_empty_results bool
 
 		err := db.QueryRow(`
-			SELECT id, invoked_with, invoked_by_id, result 
-			FROM tasks_queued 
-			WHERE finished_at IS NOT NULL
-			AND result_sent_at IS NULL 
-			LIMIT 1
-		`).Scan(&id, &invokedWith, &invokedByID, &result)
+			SELECT id, invoked_with, invoked_by_id, result, rc 
+			FROM   tasks_queued 
+			WHERE  finished_at IS NOT NULL
+			AND    result_sent_at IS NULL 
+			LIMIT  1
+		`).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				// No tasks ready to process right now; safely skip
 				continue
 			}
 			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
+			continue
+		}
+
+		err1 := db.QueryRow(`
+			SELECT s_value 
+			FROM   wingman_settings 
+			WHERE  s_key = 'send_empty_results';
+		`).Scan(&str_send_empty_results)
+		log.Printf("send_empty_results value is %s", str_send_empty_results)
+		if err1 != nil {
+			bl_send_empty_results = false
+		} else {
+			bl_send_empty_results_t, err2 := strconv.ParseBool(str_send_empty_results)
+			bl_send_empty_results = bl_send_empty_results_t
+			if err2 != nil {
+				// Handle the error if the string isn't a valid boolean representation
+				fmt.Println("Error parsing string:", err2)
+				bl_send_empty_results = false
+			}
+		}
+
+		if bl_send_empty_results == false &&
+			len(strings.TrimSpace(result)) == 0 &&
+			rc == 0 &&
+			invokedWith == "cron" {
+			// it means the result is empty after removing whitespace
+			// rc 0 - finished correctly
+			// and was invoked by Cron
+			markTaskAsSended(db, id)
 			continue
 		}
 		channel_to_use_obj, ok := channels[invokedWith]
@@ -309,7 +353,7 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 			var default_channel string
 			err := db.QueryRow(`
 				SELECT s_value FROM wingman_settings 
-				WHERE s_key='default_channel';
+				WHERE  s_key='default_channel';
 			`).Scan(&default_channel)
 			if err != nil {
 				if err == sql.ErrNoRows {
@@ -328,19 +372,12 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 		}
 		if channel_to_use != "devnull" {
 			log.Printf("channel_to_use is %s", channel_to_use)
-			invokedByID_int, err := strconv.ParseInt(invokedByID, 10, 64)
+			//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
+			invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
 			c, ok := channels[channel_to_use]
 			if !ok {
 				log.Printf("we have no real target to send the result to, including no default channel defined")
-				now := time.Now().UTC().Unix()
-				// otherwise we would get this exactly task indefinetly
-				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
-				if err != nil {
-					log.Printf("error updating result_sent_at for task %d: %v", id, err)
-				} else {
-					// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
-					log.Printf("updated result_sent_at successfully %d", id)
-				}
+				markTaskAsSended(db, id)
 				continue
 			}
 			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
@@ -351,28 +388,14 @@ func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channe
 				tg_call_res = sendResult(&c, nil, result, id)
 			}
 			if tg_call_res == 0 {
-				now := time.Now().UTC().Unix()
-				_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
-				if err != nil {
-					log.Printf("error updating result_sent_at for task %d: %v", id, err)
-				} else {
-					log.Printf("successfully sent telegram result for task %d", id)
-				}
+				markTaskAsSended(db, id)
 			} else {
 				log.Printf("the call to channels/telegram/ service returned error")
 				continue
 			}
 		} else {
 			log.Printf("we have no real target to send the result to, including no default channel defined")
-			now := time.Now().UTC().Unix()
-			// otherwise we would get this exactly task indefinetly
-			_, err = db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, id)
-			if err != nil {
-				log.Printf("error updating result_sent_at for task %d: %v", id, err)
-			} else {
-				// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
-				log.Printf("updated result_sent_at successfully %d", id)
-			}
+			markTaskAsSended(db, id)
 			continue
 		}
 	}
@@ -387,7 +410,6 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 		req["chat_id"] = *recipient
 		endpoint = channel.Endpoint
 	}
-
 	jsonData, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("error marshaling telegram request for task %d: %v", taskID, err)
