@@ -65,3 +65,7 @@ against the `telegram.db` in `channels/telegram` folder:
 sqlite3 telegram.db
 INSERT INTO known_ids (chat_id, role, is_default) VALUES (<CHANGENUMBER>, "owner", 1);
 ```
+
+## Known tradeoffs
+1. If a task was invoked but failed to run, it will never be invoked again. This no-retry logic is tied to `SELECT * FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1` to prevent endless loops.
+2. The very first cron check-up happens after waiting for the first loop iteration, so it could omit a task planned for the exact minute the application started. This is unlikely to happen in real-life. Furthermore, since the task is scheduled, it will trigger next time. To keep things simple, I am temporarily okay with that.
