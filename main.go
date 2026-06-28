@@ -495,7 +495,6 @@ func main() {
 
 		var req struct {
 			PluginID string            `json:"plugin_id"`
-			Chat_ID  int               `json:"chat_id"`
 			Inv_With string            `json:"inv_with"`
 			Inv_By   string            `json:"inv_by"`
 			Params   map[string]string `json:"params"`
