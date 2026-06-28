@@ -16,7 +16,7 @@ fi
 sqlite3 "$DB_NAME" <<EOF
 CREATE TABLE IF NOT EXISTS wingman_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    s_key TEXT NOT NULL,
+    s_key TEXT NOT NULL UNIQUE,
     s_value TEXT NOT NULL
 );
 
