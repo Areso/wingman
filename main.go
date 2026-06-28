@@ -241,7 +241,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		runErr := cmd.Run()
 		rc := 0
 		if runErr != nil {
-			// 6. Check if the error was caused by a timeout
+			// Check if the error was caused by a timeout
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				log.Printf("Command timed out after %v", timeout)
 				rc = -1 // RC for timeout (for now)
