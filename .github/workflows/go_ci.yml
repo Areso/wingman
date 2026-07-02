@@ -23,6 +23,12 @@ jobs:
     - name: Root - Go Vet
       run: go vet .
 
+    - name: Root - Go Fmt Check
+      run: |
+        # If gofmt outputs anything, grep will find it and exit with 0, 
+        # so we invert it with '!' to make the workflow fail.
+        ! gofmt -l . | grep -q .
+
     - name: Root - Go Build
       run: go build .
 
