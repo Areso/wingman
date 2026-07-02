@@ -24,6 +24,7 @@ import (
 type Plugin struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
+	Enabled            bool   `json:"enabled"`
 	InvocationWith     string `json:"invocation_with"`
 	InvocationFile     string `json:"invocation_file"`
 	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
@@ -35,6 +36,7 @@ type Plugin struct {
 
 type Channel struct {
 	ID            string `json:"id"`
+	Enabled       bool   `json:"enabled"`
 	Address       string `json:"address"`
 	Port          int    `json:"port"`
 	Endpoint      string `json:"endpoint"`
@@ -64,6 +66,10 @@ func loadPlugins(dir string) ([]Plugin, error) {
 			log.Printf("skipping %s: %v", entry.Name(), err)
 			continue
 		}
+		if p.Enabled == false {
+			// skip it, if it is not enabled
+			continue
+		}
 		p.Dir = filepath.Join(dir, entry.Name())
 		plugins = append(plugins, p)
 	}
@@ -89,6 +95,10 @@ func loadChannels(dir string) ([]Channel, error) {
 		var p Channel
 		if err := json.Unmarshal(data, &p); err != nil {
 			log.Printf("skipping %s: %v", entry.Name(), err)
+			continue
+		}
+		if p.Enabled == false {
+			// skip it, if it is not enabled
 			continue
 		}
 		p.Dir = filepath.Join(dir, entry.Name())

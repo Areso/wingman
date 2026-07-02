@@ -1,6 +1,7 @@
 {
     "id":"check_mysql_port_open_on_localhost",
     "name":"Check MySQL port open on localhost",
+    "enabled":true,
     "invocation_with":"sh",
     "invocation_file":"app.sh",
     "invocation_type": "sync",

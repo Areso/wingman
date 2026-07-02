@@ -22,6 +22,7 @@ import (
 type Plugin struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	Enabled        bool     `json:"enabled"`
 	InvocationWith string   `json:"invocation_with"`
 	InvocationFile string   `json:"invocation_file"`
 	Options        []string `json:"options"`
@@ -217,7 +218,10 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 			log.Printf("skipping %s: %v", entry.Name(), err)
 			continue
 		}
-
+		if p.Enabled == false {
+			// skip it, if it is not enabled
+			continue
+		}
 		// Only register plugins with ad_hoc: true
 		if p.Adhoc == true {
 			p.Dir = filepath.Join(pluginsDir, entry.Name())
