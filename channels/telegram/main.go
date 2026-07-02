@@ -303,6 +303,17 @@ func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) 
 	}
 	// send message to a telegram chat
 	text := req.Message
+	if len(text) > 4095 {
+		safeEnd := 0
+		// Ranging over a string gives you the starting byte index of each character
+		for idx := range text {
+			if idx > 4095 {
+				break
+			}
+			safeEnd = idx
+		}
+		text = text[0:safeEnd]
+	}
 	if strings.TrimSpace(text) == "" {
 		text = "(plugin produced no output)"
 	}
@@ -349,8 +360,23 @@ func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to resolve default chat", http.StatusInternalServerError)
 		return
 	}
+	text := req.Message
+	if len(text) > 4095 {
+		safeEnd := 0
+		// Ranging over a string gives you the starting byte index of each character
+		for idx := range text {
+			if idx > 4095 {
+				break
+			}
+			safeEnd = idx
+		}
+		text = text[0:safeEnd]
+	}
+	if strings.TrimSpace(text) == "" {
+		text = "(plugin produced no output)"
+	}
 	// send message to the resolved default telegram chat
-	msg := tgbotapi.NewMessage(chatID, req.Message)
+	msg := tgbotapi.NewMessage(chatID, text)
 	b.api.Send(msg)
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
