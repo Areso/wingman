@@ -375,9 +375,12 @@ func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(text) == "" {
 		text = "(plugin produced no output)"
 	}
-	// send message to the resolved default telegram chat
 	msg := tgbotapi.NewMessage(chatID, text)
-	b.api.Send(msg)
+	if _, err := b.api.Send(msg); err != nil {
+		log.Printf("failed to send telegram message to chat %d: %v", chatID, err)
+		http.Error(w, fmt.Sprintf("failed to send teelgram message: %v", err), http.StatusInternalServerError)
+		return
+	}
 	// end of block sending message to a telegram chat
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Message sent successfully"))
