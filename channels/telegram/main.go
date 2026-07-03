@@ -254,9 +254,9 @@ func (b *Bot) start() error {
 	// Set up HTTP endpoint for plugin invocation
 	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
 	// Set up HTTP endpoint for sending a message
-	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessageToChatID)
+	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessage)
 	// Set up HTTP endpoint for sending a message to the default chat
-	http.HandleFunc("/send_message_to_default", b.handleSendMessageToDefault)
+	http.HandleFunc("/send_message_to_default", b.handleSendMessage)
 	go func() {
 		log.Printf("Starting HTTP server on %s:%d", b.host, b.port)
 		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", b.host, b.port), nil); err != nil {
@@ -281,107 +281,70 @@ func (b *Bot) start() error {
 	return nil
 }
 
-// handleSendMessageToChatID handles the /send_message_to_chat_id <chat_id> <message> command
-func (b *Bot) handleSendMessageToChatID(w http.ResponseWriter, r *http.Request) {
+func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		log.Printf("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed to read request body")
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
-	var req SendMsgRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("Invalid JSON: %v (body=%s)", err, string(body))
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-	// send message to a telegram chat
-	text := req.Message
-	if len(text) > 4095 {
-		safeEnd := 0
-		// Ranging over a string gives you the starting byte index of each character
-		for idx := range text {
-			if idx > 4095 {
-				break
-			}
-			safeEnd = idx
-		}
-		text = text[0:safeEnd]
-	}
-	if strings.TrimSpace(text) == "" {
-		text = "(plugin produced no output)"
-	}
-	msg := tgbotapi.NewMessage(req.ChatID, text)
-	if _, err := b.api.Send(msg); err != nil {
-		log.Printf("failed to send telegram message to chat %d: %v", req.ChatID, err)
-		http.Error(w, fmt.Sprintf("failed to send teelgram message: %v", err), http.StatusInternalServerError)
-		return
-	}
-	// end of block sending message to a telegram chat
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Message sent successfully"))
-}
 
-// handleSendMessageToDefault handles /send_message_to_default <message> by resolving the
-// default owner chat_id from the known_ids table and forwarding the message there.
-func (b *Bot) handleSendMessageToDefault(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		log.Printf("Method not allowed")
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("Failed to read request body")
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-	var req SendMsgRequestToDefault
-	if err := json.Unmarshal(body, &req); err != nil {
-		log.Printf("Invalid JSON: %v (body=%s)", err, string(body))
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-	chatID, err := getDefaultChatID(b.db)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Printf("no default owner chat_id configured in known_ids")
-			http.Error(w, "no default chat configured", http.StatusNotFound)
+	var chatID int64
+	var text string
+
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/send_message_to_default"):
+		var req SendMsgRequestToDefault
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
-		log.Printf("error querying default chat_id: %v", err)
-		http.Error(w, "Failed to resolve default chat", http.StatusInternalServerError)
-		return
+		cid, err := getDefaultChatID(b.db)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "no default chat configured", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "Failed to resolve default chat", http.StatusInternalServerError)
+			return
+		}
+		chatID = cid
+		text = req.Message
+	default:
+		var req SendMsgRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		chatID = req.ChatID
+		text = req.Message
 	}
-	text := req.Message
+
 	if len(text) > 4095 {
 		safeEnd := 0
-		// Ranging over a string gives you the starting byte index of each character
 		for idx := range text {
 			if idx > 4095 {
 				break
 			}
 			safeEnd = idx
 		}
-		text = text[0:safeEnd]
+		text = text[:safeEnd]
 	}
 	if strings.TrimSpace(text) == "" {
 		text = "(plugin produced no output)"
 	}
+
 	msg := tgbotapi.NewMessage(chatID, text)
 	if _, err := b.api.Send(msg); err != nil {
 		log.Printf("failed to send telegram message to chat %d: %v", chatID, err)
-		http.Error(w, fmt.Sprintf("failed to send teelgram message: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to send telegram message: %v", err), http.StatusInternalServerError)
 		return
 	}
-	// end of block sending message to a telegram chat
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Message sent successfully"))
 }
