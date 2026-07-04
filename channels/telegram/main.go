@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,21 +17,23 @@ import (
 	"github.com/BurntSushi/toml"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/robfig/cron/v3"
 )
 
 // Plugin represents a loaded plugin
 type Plugin struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Enabled        bool     `json:"enabled"`
-	InvocationWith string   `json:"invocation_with"`
-	InvocationFile string   `json:"invocation_file"`
-	Options        []string `json:"options"`
-	Adhoc          bool     `json:"adhoc"`
-	Cron           bool     `json:"cron"`
-	CronTime       string   `json:"cron_time"`
-	Dir            string
-	MinAllowedRole string `json:"min_allowed_role"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Enabled            bool     `json:"enabled"`
+	InvocationWith     string   `json:"invocation_with"`
+	InvocationFile     string   `json:"invocation_file"`
+	InvocationTimeoutS int32    `json:"invocation_timeout_s"`
+	Options            []string `json:"options"`
+	Adhoc              bool     `json:"adhoc"`
+	Cron               bool     `json:"cron"`
+	CronTime           string   `json:"cron_time"`
+	Dir                string
+	MinAllowedRole     string `json:"min_allowed_role"`
 }
 
 // PluginInvocationRequest represents the request to invoke a plugin
@@ -209,6 +212,18 @@ func (p *Plugin) Validate() error {
 	}
 	if strings.TrimSpace(p.InvocationFile) == "" {
 		return fmt.Errorf("field 'invocation_file' cannot be empty")
+	}
+	if p.InvocationTimeoutS < 0 {
+		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
+	}
+	// Validate cron timing string if cron is enabled
+	if p.Cron && strings.TrimSpace(p.CronTime) == "" {
+		return errors.New("field 'cron_time' cannot be empty when cron is enabled")
+	}
+	expr := p.CronTime
+	_, err := cron.ParseStandard(expr)
+	if err != nil {
+		return errors.New("field 'cron_time' has incorrect value")
 	}
 	return nil
 }
