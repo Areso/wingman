@@ -117,6 +117,7 @@ func loadConfigs[T any, PT interface {
 	if err != nil {
 		return nil, err
 	}
+	seenIDs := make(map[string]bool)
 	var result []T
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -137,6 +138,12 @@ func loadConfigs[T any, PT interface {
 		if !common.Enabled {
 			continue
 		}
+		id := strings.TrimSpace(common.ID)
+		if seenIDs[id] {
+			log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
+			continue
+		}
+		seenIDs[id] = true
 		common.Dir = filepath.Join(dir, entry.Name())
 		// Execute validation before appending to the results array
 		if err := PT(&item).Validate(); err != nil {

@@ -194,6 +194,25 @@ func loadBotToken() (string, error) {
 	return token, nil
 }
 
+func (p *Plugin) Validate() error {
+	if len(strings.TrimSpace(p.ID)) > 96 {
+		return fmt.Errorf("id is too long (max 96 symbols, got %d)", len(strings.TrimSpace(p.ID)))
+	}
+	if strings.TrimSpace(p.ID) == "" {
+		return fmt.Errorf("field 'id' cannot be empty")
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return fmt.Errorf("field 'name' cannot be empty")
+	}
+	if strings.TrimSpace(p.InvocationWith) == "" {
+		return fmt.Errorf("field 'invocation_with' cannot be empty")
+	}
+	if strings.TrimSpace(p.InvocationFile) == "" {
+		return fmt.Errorf("field 'invocation_file' cannot be empty")
+	}
+	return nil
+}
+
 // loadPlugins reads and filters plugins from plugins directory
 func (b *Bot) loadPlugins(pluginsDir string) error {
 	entries, err := os.ReadDir(pluginsDir)
@@ -201,6 +220,7 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 		return fmt.Errorf("failed to read plugins directory: %w", err)
 	}
 
+	seenIDs := make(map[string]bool)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -218,13 +238,25 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 			log.Printf("skipping %s: %v", entry.Name(), err)
 			continue
 		}
-		if p.Enabled == false {
-			// skip it, if it is not enabled
+		if !p.Enabled {
 			continue
 		}
-		// Only register plugins with ad_hoc: true
-		if p.Adhoc == true {
-			p.Dir = filepath.Join(pluginsDir, entry.Name())
+
+		id := strings.TrimSpace(p.ID)
+		if seenIDs[id] {
+			log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
+			continue
+		}
+		seenIDs[id] = true
+
+		p.Dir = filepath.Join(pluginsDir, entry.Name())
+
+		if err := p.Validate(); err != nil {
+			log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
+			continue
+		}
+
+		if p.Adhoc {
 			b.plugins[p.ID] = &p
 			log.Printf("Registered ad_hoc plugin: %s (%s)", p.Name, p.ID)
 		}
