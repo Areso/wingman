@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +38,9 @@ func (c *CommonConfig) Validate() error {
 	if len(strings.TrimSpace(c.ID)) > 96 {
 		return fmt.Errorf("id is too long (max 96 symbols, got %d)", len(strings.TrimSpace(c.ID)))
 	}
+	if strings.TrimSpace(c.ID) == "" {
+		return fmt.Errorf("field 'id' cannot be empty")
+	}
 	return nil
 }
 
@@ -58,8 +60,24 @@ func (p *Plugin) Validate() error {
 	if err := p.CommonConfig.Validate(); err != nil {
 		return err
 	}
-	// 2. Validate all structural fields are filled
-	return validateFields(reflect.ValueOf(p).Elem())
+	if strings.TrimSpace(p.Name) == "" {
+		return errors.New("field 'name' cannot be empty")
+	}
+	if strings.TrimSpace(p.InvocationWith) == "" {
+		return errors.New("field 'invocation_with' cannot be empty")
+	}
+	if strings.TrimSpace(p.InvocationFile) == "" {
+		return errors.New("field 'invocation_file' cannot be empty")
+	}
+	// (Optional) Check numeric bounds for timeouts
+	if p.InvocationTimeoutS < 0 {
+		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
+	}
+	// 4. Validate cron timing string if cron is enabled
+	if p.Cron && strings.TrimSpace(p.CronTime) == "" {
+		return errors.New("field 'cron_time' cannot be empty when cron is enabled")
+	}
+	return nil
 }
 
 type Channel struct {
@@ -79,39 +97,14 @@ func (c *Channel) Validate() error {
 	if c.Port < 1 || c.Port > 65000 {
 		return fmt.Errorf("port %d out of bounds (must be 1-65000)", c.Port)
 	}
-	// 3. Validate all structural fields are filled
-	return validateFields(reflect.ValueOf(c).Elem())
-}
-
-// validateFields accurately checks top-level non-boolean fields for zero values
-func validateFields(v reflect.Value) error {
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		fieldType := v.Type().Field(i)
-		// Skip unexported fields or the explicitly ignored "Dir" field
-		if !field.CanInterface() || fieldType.Name == "Dir" {
-			continue
-		}
-		// Skip the embedded struct itself to prevent reflection access panics;
-		// its fields are validated independently via c.CommonConfig.Validate()
-		if fieldType.Anonymous {
-			continue
-		}
-		// Allow booleans to be false natively
-		if field.Kind() == reflect.Bool {
-			continue
-		}
-		// Handle pointers securely if your configuration leverages them
-		if field.Kind() == reflect.Ptr {
-			if field.IsNil() {
-				return fmt.Errorf("missing required field: %s", fieldType.Name)
-			}
-			field = field.Elem()
-		}
-		// Enforce that all other fields must contain data
-		if reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
-			return fmt.Errorf("field '%s' cannot be empty or zero", fieldType.Name)
-		}
+	if strings.TrimSpace(c.Address) == "" {
+		return errors.New("field 'address' cannot be empty")
+	}
+	if strings.TrimSpace(c.Endpoint) == "" {
+		return errors.New("field 'endpoint' cannot be empty")
+	}
+	if strings.TrimSpace(c.EndpointToDef) == "" {
+		return errors.New("field 'endpoint_to_default' cannot be empty")
 	}
 	return nil
 }
