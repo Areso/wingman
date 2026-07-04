@@ -225,6 +225,12 @@ func (p *Plugin) Validate() error {
 	if err != nil {
 		return errors.New("field 'cron_time' has incorrect value")
 	}
+	switch p.MinAllowedRole {
+	case "guest", "user", "owner":
+		// Valid role, do nothing
+	default:
+		return fmt.Errorf("field 'min_allowed_role' value should be guest or user or owner, current value is %s", p.MinAllowedRole)
+	}
 	return nil
 }
 
