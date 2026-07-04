@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -21,90 +22,138 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+type Config interface {
+	GetCommon() *CommonConfig
+	Validate() error
+}
+type CommonConfig struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+	Dir     string `json:"-"`
+}
+
+func (c *CommonConfig) GetCommon() *CommonConfig { return c }
+
+// Validate checks basic CommonConfig rules.
+func (c *CommonConfig) Validate() error {
+	if len(strings.TrimSpace(c.ID)) > 96 {
+		return fmt.Errorf("id is too long (max 96 symbols, got %d)", len(strings.TrimSpace(c.ID)))
+	}
+	return nil
+}
+
 type Plugin struct {
-	ID                 string `json:"id"`
+	CommonConfig
 	Name               string `json:"name"`
-	Enabled            bool   `json:"enabled"`
 	InvocationWith     string `json:"invocation_with"`
 	InvocationFile     string `json:"invocation_file"`
 	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
 	Adhoc              bool   `json:"adhoc"`
 	Cron               bool   `json:"cron"`
 	CronTime           string `json:"cron_time"`
-	Dir                string
+}
+
+func (p *Plugin) Validate() error {
+	// 1. Validate embedded common rules
+	if err := p.CommonConfig.Validate(); err != nil {
+		return err
+	}
+	// 2. Validate all structural fields are filled
+	return validateFields(reflect.ValueOf(p).Elem())
 }
 
 type Channel struct {
+	CommonConfig
 	ID            string `json:"id"`
-	Enabled       bool   `json:"enabled"`
 	Address       string `json:"address"`
 	Port          int    `json:"port"`
 	Endpoint      string `json:"endpoint"`
 	EndpointToDef string `json:"endpoint_to_default"`
-	Dir           string
 }
 
-func loadPlugins(dir string) ([]Plugin, error) {
+func (c *Channel) Validate() error {
+	// 1. Validate embedded common rules
+	if err := c.CommonConfig.Validate(); err != nil {
+		return err
+	}
+	// 2. Validate custom port rules
+	if c.Port < 1 || c.Port > 65000 {
+		return fmt.Errorf("port %d out of bounds (must be 1-65000)", c.Port)
+	}
+	// 3. Validate all structural fields are filled
+	return validateFields(reflect.ValueOf(c).Elem())
+}
+
+// validateFields accurately checks top-level non-boolean fields for zero values
+func validateFields(v reflect.Value) error {
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		fieldType := v.Type().Field(i)
+		// Skip unexported fields or the explicitly ignored "Dir" field
+		if !field.CanInterface() || fieldType.Name == "Dir" {
+			continue
+		}
+		// Skip the embedded struct itself to prevent reflection access panics;
+		// its fields are validated independently via c.CommonConfig.Validate()
+		if fieldType.Anonymous {
+			continue
+		}
+		// Allow booleans to be false natively
+		if field.Kind() == reflect.Bool {
+			continue
+		}
+		// Handle pointers securely if your configuration leverages them
+		if field.Kind() == reflect.Ptr {
+			if field.IsNil() {
+				return fmt.Errorf("missing required field: %s", fieldType.Name)
+			}
+			field = field.Elem()
+		}
+		// Enforce that all other fields must contain data
+		if reflect.DeepEqual(field.Interface(), reflect.Zero(field.Type()).Interface()) {
+			return fmt.Errorf("field '%s' cannot be empty or zero", fieldType.Name)
+		}
+	}
+	return nil
+}
+
+func loadConfigs[T any, PT interface {
+	*T
+	Config
+}](dir, filename string) ([]T, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-
-	var plugins []Plugin
+	var result []T
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name(), "plugin.json")
+		path := filepath.Join(dir, entry.Name(), filename)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			log.Printf("skipping %s: %v", entry.Name(), err)
 			continue
 		}
-		var p Plugin
-		if err := json.Unmarshal(data, &p); err != nil {
+		var item T
+		if err := json.Unmarshal(data, &item); err != nil {
 			log.Printf("skipping %s: %v", entry.Name(), err)
 			continue
 		}
-		if p.Enabled == false {
-			// skip it, if it is not enabled
+		common := PT(&item).GetCommon()
+		if !common.Enabled {
 			continue
 		}
-		p.Dir = filepath.Join(dir, entry.Name())
-		plugins = append(plugins, p)
+		common.Dir = filepath.Join(dir, entry.Name())
+		// Execute validation before appending to the results array
+		if err := PT(&item).Validate(); err != nil {
+			log.Printf("skipping invalid config %s: %v", entry.Name(), err)
+			continue
+		}
+		result = append(result, item)
 	}
-	return plugins, nil
-}
-
-func loadChannels(dir string) ([]Channel, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var channels []Channel
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name(), "channel.json")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
-			continue
-		}
-		var p Channel
-		if err := json.Unmarshal(data, &p); err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
-			continue
-		}
-		if p.Enabled == false {
-			// skip it, if it is not enabled
-			continue
-		}
-		p.Dir = filepath.Join(dir, entry.Name())
-		channels = append(channels, p)
-	}
-	return channels, nil
+	return result, nil
 }
 
 func isCroned(p Plugin) bool {
@@ -300,7 +349,7 @@ func markTaskAsSended(db *sql.DB, taskID int64) {
 	}
 }
 
-func processFinishedTasks(db *sql.DB, config *Config, channels map[string]Channel) {
+func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 	for range time.NewTicker(time.Second * 5).C {
 		var id int64
 		var invokedWith string
@@ -447,14 +496,14 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 	}
 }
 
-type Config struct {
+type AppConfig struct {
 	Host string `toml:"host"`
 	Port int    `toml:"port"`
 }
 
 func main() {
 	// Read config
-	var config Config
+	var config AppConfig
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Printf("Failed to read config.toml, using defaults: %v", err)
 		config.Host = "127.0.0.1"
@@ -467,7 +516,7 @@ func main() {
 	}
 	defer db.Close()
 
-	plugins, err := loadPlugins("plugins")
+	plugins, err := loadConfigs[Plugin]("plugins", "plugin.json")
 	if err != nil {
 		log.Fatalf("failed to load plugins: %v", err)
 	}
@@ -478,7 +527,7 @@ func main() {
 		pluginsMap[p.ID] = p
 	}
 
-	channels, err := loadChannels("channels")
+	channels, err := loadConfigs[Channel]("channels", "channel.json")
 	if err != nil {
 		log.Fatalf("failed to load channels: %v", err)
 	}
@@ -493,7 +542,7 @@ func main() {
 	go processQueuedTasks(db, pluginsMap)
 
 	// Start the telegram results sender
-	go processFinishedTasks(db, &config, channelsMap)
+	go processFinishedTasks(db, channelsMap)
 
 	// Set up HTTP endpoints
 
