@@ -64,7 +64,6 @@ func (p *Plugin) Validate() error {
 
 type Channel struct {
 	CommonConfig
-	ID            string `json:"id"`
 	Address       string `json:"address"`
 	Port          int    `json:"port"`
 	Endpoint      string `json:"endpoint"`
