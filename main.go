@@ -297,7 +297,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
 		}
 		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-		log.Printf("timeout from the plugin.json is %v", timeout)
+		// log.Printf("timeout from the plugin.json is %v", timeout)
 		if timeout == 0 {
 			// 0 if plugin.json doesn't have invocation_timeout_s property
 			timeout = 30 * time.Second
@@ -354,7 +354,7 @@ func markTaskAsSended(db *sql.DB, taskID int64) {
 	// otherwise we would get this exactly task indefinetly
 	_, err := db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, taskID)
 	if err != nil {
-		log.Printf("error updating result_sent_at for task %d: %v", taskID, err)
+		log.Fatalf("error updating result_sent_at for task %d: %v", taskID, err)
 	} else {
 		// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
 		log.Printf("updated result_sent_at successfully %d", taskID)
@@ -393,7 +393,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			FROM   wingman_settings 
 			WHERE  s_key = 'send_empty_results';
 		`).Scan(&str_send_empty_results)
-		log.Printf("send_empty_results value is %s", str_send_empty_results)
+		// log.Printf("send_empty_results value is %s", str_send_empty_results)
 		if err1 != nil {
 			bl_send_empty_results = false
 		} else {
