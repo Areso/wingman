@@ -87,7 +87,6 @@ func (p *Plugin) Validate() error {
 	case "guest", "user", "owner":
 		// Valid role, do nothing
 	default:
-		//return errors.New("field 'min_allowed_role' value should be guest or user or owner")
 		return fmt.Errorf("field 'min_allowed_role' value should be guest or user or owner, current value is %s", p.MinAllowedRole)
 	}
 	return nil
@@ -160,7 +159,8 @@ func loadConfigs[T any, PT interface {
 		common.Dir = filepath.Join(dir, entry.Name())
 		// Execute validation before appending to the results array
 		if err := PT(&item).Validate(); err != nil {
-			log.Printf("skipping invalid config %s: %v", entry.Name(), err)
+			// log.Printf("skipping invalid config %s: %v", entry.Name(), err)
+			log.Fatalf("invalid config %s: %v", entry.Name(), err)
 			continue
 		}
 		result = append(result, item)

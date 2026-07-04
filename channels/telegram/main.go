@@ -273,7 +273,8 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 		p.Dir = filepath.Join(pluginsDir, entry.Name())
 
 		if err := p.Validate(); err != nil {
-			log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
+			// log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
+			log.Fatalf("invalid config %s: %v", entry.Name(), err)
 			continue
 		}
 
