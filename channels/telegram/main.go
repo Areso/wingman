@@ -378,15 +378,15 @@ func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		text = req.Message
 	}
 
-	if len(text) > 4095 {
+	if len(text) > 4060 {
 		safeEnd := 0
 		for idx := range text {
-			if idx > 4095 {
+			if idx > 4060 {
 				break
 			}
 			safeEnd = idx
 		}
-		text = text[:safeEnd]
+		text = text[:safeEnd] + "...[truncated due to size, limit is 4060 bytes]"
 	}
 	if strings.TrimSpace(text) == "" {
 		text = "(plugin produced no output)"
