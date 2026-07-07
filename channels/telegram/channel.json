@@ -4,5 +4,6 @@
     "address":"127.0.0.1",
     "port":8085,
     "endpoint":"send_message_to_chat_id",
-    "endpoint_to_default":"send_message_to_default"
+    "endpoint_to_default":"send_message_to_default",
+    "secret_location":"channels/telegram_core"
 }

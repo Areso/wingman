@@ -94,20 +94,66 @@ func (p *Plugin) Validate() error {
 
 type Channel struct {
 	CommonConfig
-	Address       string `json:"address"`
-	Port          int    `json:"port"`
-	Endpoint      string `json:"endpoint"`
-	EndpointToDef string `json:"endpoint_to_default"`
+	Address        string `json:"address"`
+	Port           int    `json:"port"`
+	Endpoint       string `json:"endpoint"`
+	EndpointToDef  string `json:"endpoint_to_default"`
+	SecretLocation string `json:"secret_location"` // this is a secret for endpoints call of the Channel
+	Secret         string
+}
+
+func (c *Channel) loadSecret() (string, string, error) {
+	// Get the env fallback token up front
+	envToken := strings.TrimSpace(os.Getenv("TELEGRAM_CH_REST_TOKEN"))
+	// If no location is provided, check if the env variable has a value.
+	// If that's empty too, the user intentionally wants NO secret. Return empty string with no error.
+	if strings.TrimSpace(c.SecretLocation) == "" {
+		if envToken != "" {
+			return envToken, "env_var", nil
+		}
+		return "", "not set", nil
+	}
+	// A secret location WAS provided, so we expect to find a secret somewhere.
+	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
+	if secretsDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", "secret_location", fmt.Errorf("Cannot load secret, exiting %v", err)
+		}
+		secretsDir = filepath.Join(homeDir, ".wingman")
+	}
+
+	secretPath := filepath.Join(secretsDir, c.SecretLocation)
+
+	secretBytes, err := os.ReadFile(secretPath)
+	if err != nil {
+		// Fallback to environment variable since file reading failed
+		if envToken != "" {
+			return envToken, "env_var", nil
+		}
+		// File missing AND env missing = Configuration Error (because SecretLocation was specified)
+		return "", "secret_location", fmt.Errorf("secret_location was set to %s but file could not be read and env fallback is missing: %w", secretPath, err)
+	}
+	return strings.TrimSpace(string(secretBytes)), "secret_location", nil
+}
+
+func getVerboseLevel() string {
+	var config AppConfig
+	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
+		panic(err)
+	}
+	return config.Verbose_Level
 }
 
 func (c *Channel) Validate() error {
+	verbosity := getVerboseLevel()
 	// 1. Validate embedded common rules
 	if err := c.CommonConfig.Validate(); err != nil {
 		return err
 	}
 	// 2. Validate custom port rules
-	if c.Port < 1 || c.Port > 65000 {
-		return fmt.Errorf("port %d out of bounds (must be 1-65000)", c.Port)
+	if c.Port < 1 || c.Port > 65535 {
+		return fmt.Errorf("port %d out of bounds (must be 1-65535)", c.Port)
 	}
 	if strings.TrimSpace(c.Address) == "" {
 		return errors.New("field 'address' cannot be empty")
@@ -118,6 +164,15 @@ func (c *Channel) Validate() error {
 	if strings.TrimSpace(c.EndpointToDef) == "" {
 		return errors.New("field 'endpoint_to_default' cannot be empty")
 	}
+	// Always invoke loadSecret. It will dynamically return "", nil if the secret is intentionally omitted.
+	secret, secret_source, err := c.loadSecret()
+	if err != nil {
+		return err
+	}
+	if verbosity == "DEBUG" {
+		log.Printf("Channel %s loaded with secret source %s", c.ID, secret_source)
+	}
+	c.Secret = secret
 	return nil
 }
 
@@ -509,8 +564,9 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 }
 
 type AppConfig struct {
-	Host string `toml:"host"`
-	Port int    `toml:"port"`
+	Host          string `toml:"host"`
+	Port          int    `toml:"port"`
+	Verbose_Level string `toml:"verbose_level"`
 }
 
 func main() {
@@ -521,7 +577,6 @@ func main() {
 		config.Host = "127.0.0.1"
 		config.Port = 8089
 	}
-
 	db, err := initDB("wingman.db")
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)

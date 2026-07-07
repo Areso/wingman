@@ -69,11 +69,12 @@ type QueueTaskRequest struct {
 
 // Bot holds the telegram bot state
 type Bot struct {
-	api     *tgbotapi.BotAPI
-	plugins map[string]*Plugin
-	port    int
-	host    string
-	db      *sql.DB
+	api         *tgbotapi.BotAPI
+	plugins     map[string]*Plugin
+	port        int
+	host        string
+	db          *sql.DB
+	rest_secret *string
 }
 
 // newBot creates a new bot instance
@@ -232,6 +233,32 @@ func (p *Plugin) Validate() error {
 		return fmt.Errorf("field 'min_allowed_role' value should be guest or user or owner, current value is %s", p.MinAllowedRole)
 	}
 	return nil
+}
+
+type Channel struct {
+	SecretLocation string `json:"secret_location"`
+}
+
+func getSecretLocation(filename string) (string, error) {
+	// Open the JSON file
+	jsonFile, err := os.Open(filename)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	// Defer closing the file until the function exits
+	defer jsonFile.Close()
+	// Read the file's content
+	byteValue, err := io.ReadAll(jsonFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+	// Unmarshal the JSON into our struct
+	var channel Channel
+	err = json.Unmarshal(byteValue, &channel)
+	if err != nil {
+		return "", fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+	return channel.SecretLocation, nil
 }
 
 // loadPlugins reads and filters plugins from plugins directory
@@ -640,6 +667,44 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Plugin invoked successfully"))
 }
 
+func readFile(secretPath string) (string, error) {
+	secretBytes, err := os.ReadFile(secretPath)
+	if err != nil {
+		log.Fatalf("Failed to load secret file %s: %v", secretPath, err)
+	}
+	return strings.TrimSpace(string(secretBytes)), nil
+}
+
+func readRESTSecret(rest_secret_location string) (string, error) {
+	if strings.TrimSpace(rest_secret_location) == "" {
+		rest_token := strings.TrimSpace(os.Getenv("TELEGRAM_CH_REST_TOKEN"))
+		return rest_token, nil
+	} else {
+		rest_secret_path, err := buildSecretPath(rest_secret_location)
+		if err != nil {
+			log.Fatal("Failed to build rest_secret_path")
+		}
+		rest_token, err := readFile(rest_secret_path)
+		if err != nil {
+			log.Fatal("Failed to read channel.json")
+		}
+		return rest_token, nil
+	}
+}
+
+func buildSecretPath(rest_secret_location string) (string, error) {
+	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
+	if secretsDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatalf("Cannot build secretsDir %v", err)
+		}
+		secretsDir = filepath.Join(homeDir, ".wingman")
+	}
+	secretPath := filepath.Join(secretsDir, rest_secret_location)
+	return secretPath, nil
+}
+
 func main() {
 	// Load config from file or use defaults
 	var config struct {
@@ -660,6 +725,19 @@ func main() {
 		log.Fatalf("Failed to load bot token: %v", err)
 	}
 
+	rest_secret_location, err := getSecretLocation("channel.json")
+	if true {
+		log.Printf("rest_secret_location is %s", rest_secret_location)
+	}
+	if err != nil {
+		log.Fatal("Failed to read channel.json")
+	}
+
+	rest_token, err := readRESTSecret(rest_secret_location)
+	if err != nil {
+		log.Fatal("Failed to perform readRESTSecret")
+	}
+
 	// Create bot instance
 	bot, err := newBot(token, config.Port, config.Host)
 	if err != nil {
@@ -673,6 +751,7 @@ func main() {
 	}
 	defer db.Close()
 	bot.db = db
+	bot.rest_secret = &rest_token
 
 	// Load plugins
 	log.Println("Loading plugins...")
