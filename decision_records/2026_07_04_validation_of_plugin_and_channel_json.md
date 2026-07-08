@@ -7,7 +7,7 @@ This decision record holds information about `plugin.json` and `channel.json` pr
 ## Decisions
 - if id of the plugin/channel is longer 96 sym, it would throw the error
 - id can not be empty
-- for channels: ports should be in range 1 to 65000
+- for channels: ports should be in range 1 to 65535
 - for channels: Address, Endpoint, EndpointToDef cannot be empty
 - for plugins: Name, InvocationWith, InvocationFile aren't empty
 - for plugins: invocation_timeout_s must be positive

@@ -137,6 +137,8 @@ func (c *Channel) loadSecret() (string, string, error) {
 	return strings.TrimSpace(string(secretBytes)), "secret_location", nil
 }
 
+var verbosity string
+
 func getVerboseLevel() string {
 	var config AppConfig
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
@@ -146,7 +148,7 @@ func getVerboseLevel() string {
 }
 
 func (c *Channel) Validate() error {
-	verbosity := getVerboseLevel()
+	//verbosity := getVerboseLevel()
 	// 1. Validate embedded common rules
 	if err := c.CommonConfig.Validate(); err != nil {
 		return err
@@ -507,16 +509,16 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 				continue
 			}
 			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
-			var tg_call_res int
+			var channel_call_res int
 			if useDefaultRecipient == false {
-				tg_call_res = sendResult(&c, &invokedByID_int, result, id)
+				channel_call_res = sendResult(&c, &invokedByID_int, result, id)
 			} else {
-				tg_call_res = sendResult(&c, nil, result, id)
+				channel_call_res = sendResult(&c, nil, result, id)
 			}
-			if tg_call_res == 0 {
+			if channel_call_res == 0 {
 				markTaskAsSended(db, id)
 			} else {
-				log.Printf("the call to channels/telegram/ service returned error")
+				log.Printf("the call to the channel service returned error")
 				continue
 			}
 		} else {
@@ -548,6 +550,9 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 		return -1
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if len(strings.TrimSpace(channel.Secret)) != 0 {
+		httpReq.Header.Set("Authorization", "Bearer "+channel.Secret)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -577,6 +582,7 @@ func main() {
 		config.Host = "127.0.0.1"
 		config.Port = 8089
 	}
+	verbosity = getVerboseLevel()
 	db, err := initDB("wingman.db")
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)

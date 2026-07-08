@@ -367,6 +367,18 @@ func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if b.rest_secret != nil && *b.rest_secret != "" {
+		authHeader := r.Header.Get("Authorization")
+
+		// Using standard Bearer token format ("Authorization: Bearer <secret>")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) || authHeader[len(prefix):] != *b.rest_secret {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -628,6 +640,18 @@ func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	if b.rest_secret != nil && *b.rest_secret != "" {
+		authHeader := r.Header.Get("Authorization")
+
+		// Using standard Bearer token format ("Authorization: Bearer <secret>")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authHeader, prefix) || authHeader[len(prefix):] != *b.rest_secret {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
@@ -726,13 +750,13 @@ func main() {
 	}
 
 	rest_secret_location, err := getSecretLocation("channel.json")
-	if true {
-		log.Printf("rest_secret_location is %s", rest_secret_location)
-	}
 	if err != nil {
 		log.Fatal("Failed to read channel.json")
 	}
 
+	if true {
+		log.Printf("rest_secret_location is %s", rest_secret_location)
+	}
 	rest_token, err := readRESTSecret(rest_secret_location)
 	if err != nil {
 		log.Fatal("Failed to perform readRESTSecret")
