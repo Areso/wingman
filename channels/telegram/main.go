@@ -77,6 +77,11 @@ type Bot struct {
 	rest_secret *string
 }
 
+type CoreConfig struct {
+	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
+	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
+}
+
 // newBot creates a new bot instance
 func newBot(token string, port int, host string) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
@@ -621,6 +626,9 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_wit
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if len(strings.TrimSpace(core_rest_secret)) != 0 {
+		httpReq.Header.Set("Authorization", "Bearer "+core_rest_secret)
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -729,6 +737,38 @@ func buildSecretPath(rest_secret_location string) (string, error) {
 	return secretPath, nil
 }
 
+type SecretSource string
+
+const (
+	FromEnv  SecretSource = "from env"
+	FromFile SecretSource = "from file"
+	NotSet   SecretSource = "not set"
+)
+
+var core_config CoreConfig
+var core_rest_secret string
+
+func loadSecretForCore() (string, SecretSource, error) {
+	if core_config.IsRESTProtected == false {
+		return "", NotSet, nil
+	}
+	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
+	if secretsDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", FromFile, fmt.Errorf("Cannot load secret, exiting %v", err)
+		}
+		secretsDir = filepath.Join(homeDir, ".wingman")
+	}
+	secretPath := filepath.Join(secretsDir, core_config.CoreRESTSecretFilename)
+	secretBytes, err := os.ReadFile(secretPath)
+	if err != nil {
+		// File missing AND env missing = Configuration Error (because SecretLocation was specified)
+		return "", FromFile, fmt.Errorf("secret_location was set to %s but file could not be read and env fallback is missing: %w", secretPath, err)
+	}
+	return strings.TrimSpace(string(secretBytes)), FromFile, nil
+}
+
 func main() {
 	// Load config from file or use defaults
 	var config struct {
@@ -740,6 +780,23 @@ func main() {
 		log.Print("Using default host 127.0.0.1 and port 8085")
 		config.Host = "127.0.0.1"
 		config.Port = 8085
+	}
+	// TODO fix relative path
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("Failed to get executable path: %v", err)
+	}
+	execDir := filepath.Dir(execPath)
+	absConfigPath := filepath.Join(execDir, "../../config.toml")
+	if _, err := toml.DecodeFile(absConfigPath, &core_config); err != nil {
+		log.Fatalf("Failed to read Core config.toml at %s: %v", absConfigPath, err)
+	}
+	secret, source, err1 := loadSecretForCore()
+	if err1 != nil {
+		log.Fatalf("error while reading secret for Core's REST: %v", err1)
+	}
+	if source != NotSet {
+		core_rest_secret = secret
 	}
 
 	// Load bot token from systemd credential

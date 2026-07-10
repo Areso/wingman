@@ -21,6 +21,14 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+type SecretSource string
+
+const (
+	FromEnv  SecretSource = "from env"
+	FromFile SecretSource = "from file"
+	NotSet   SecretSource = "not set"
+)
+
 type Config interface {
 	GetCommon() *CommonConfig
 	Validate() error
@@ -135,6 +143,27 @@ func (c *Channel) loadSecret() (string, string, error) {
 		return "", "secret_location", fmt.Errorf("secret_location was set to %s but file could not be read and env fallback is missing: %w", secretPath, err)
 	}
 	return strings.TrimSpace(string(secretBytes)), "secret_location", nil
+}
+
+func loadSecretForCore() (string, SecretSource, error) {
+	if config.IsRESTProtected == false {
+		return "", NotSet, nil
+	}
+	secretsDir := os.Getenv("WINGMAN_SECRETS_DIR")
+	if secretsDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", FromFile, fmt.Errorf("Cannot load secret, exiting %v", err)
+		}
+		secretsDir = filepath.Join(homeDir, ".wingman")
+	}
+	secretPath := filepath.Join(secretsDir, config.CoreRESTSecretFilename)
+	secretBytes, err := os.ReadFile(secretPath)
+	if err != nil {
+		// File missing AND env missing = Configuration Error (because SecretLocation was specified)
+		return "", FromFile, fmt.Errorf("secret_location was set to %s but file could not be read and env fallback is missing: %w", secretPath, err)
+	}
+	return strings.TrimSpace(string(secretBytes)), FromFile, nil
 }
 
 var verbosity string
@@ -569,14 +598,20 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 }
 
 type AppConfig struct {
-	Host          string `toml:"host"`
-	Port          int    `toml:"port"`
-	Verbose_Level string `toml:"verbose_level"`
+	Host                   string `toml:"host"`
+	Port                   int    `toml:"port"`
+	Verbose_Level          string `toml:"verbose_level"`
+	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
+	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
 }
+
+var config AppConfig
+
+var core_rest_secret string
 
 func main() {
 	// Read config
-	var config AppConfig
+	//var config AppConfig
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Printf("Failed to read config.toml, using defaults: %v", err)
 		config.Host = "127.0.0.1"
@@ -611,6 +646,14 @@ func main() {
 		channelsMap[c.ID] = c
 	}
 
+	secret, source, err1 := loadSecretForCore()
+	if err1 != nil {
+		log.Fatalf("error while reading secret for Core's REST: %v", err1)
+	}
+	if source != NotSet {
+		core_rest_secret = secret
+	}
+
 	// Start the queued task processor
 	go processQueuedTasks(db, pluginsMap)
 
@@ -623,6 +666,16 @@ func main() {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+
+		if source != NotSet {
+			authHeader := r.Header.Get("Authorization")
+			// Using standard Bearer token format ("Authorization: Bearer <secret>")
+			const prefix = "Bearer "
+			if !strings.HasPrefix(authHeader, prefix) || authHeader[len(prefix):] != secret {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		var req struct {
