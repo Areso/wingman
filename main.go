@@ -84,8 +84,13 @@ func (p *Plugin) Validate() error {
 		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
 	}
 	// Validate cron timing string if cron is enabled
-	if p.Cron && strings.TrimSpace(p.CronTime) == "" {
-		return errors.New("field 'cron_time' cannot be empty when cron is enabled")
+	if p.Cron {
+		if strings.TrimSpace(p.CronTime) == "" {
+			return errors.New("field 'cron_time' cannot be empty when cron is enabled")
+		}
+		if _, err := cron.ParseStandard(p.CronTime); err != nil {
+			return fmt.Errorf("field 'cron_time' has incorrect value: %w", err)
+		}
 	}
 	expr := p.CronTime
 	_, err := cron.ParseStandard(expr)
