@@ -611,11 +611,8 @@ var core_rest_secret string
 
 func main() {
 	// Read config
-	//var config AppConfig
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
-		log.Printf("Failed to read config.toml, using defaults: %v", err)
-		config.Host = "127.0.0.1"
-		config.Port = 8089
+		log.Fatalf("Failed to read config.toml, using defaults: %v", err)
 	}
 	verbosity = getVerboseLevel()
 	db, err := initDB("wingman.db")
