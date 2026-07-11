@@ -5,3 +5,5 @@ verbose_level = "DEBUG"
 is_core_rest_protected = true
 core_rest_secret_filename = "core_rest_secret"
 retries_threshold = 5
+tasks_retention = true
+tasks_retention_days = 14

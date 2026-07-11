@@ -178,7 +178,6 @@ func getVerboseLevel() string {
 }
 
 func (c *Channel) Validate() error {
-	//verbosity := getVerboseLevel()
 	// 1. Validate embedded common rules
 	if err := c.CommonConfig.Validate(); err != nil {
 		return err
@@ -346,6 +345,22 @@ func initDB(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if verbosity == "DEBUG" || verbosity == "INFO" {
+		log.Printf("config.TasksRetetion is %t", config.TasksRetention)
+	}
+	if config.TasksRetention {
+		if config.TasksRetentionDays < 1 {
+			return nil, fmt.Errorf("Task Retention Days should be >= 1")
+		}
+		_, err = db.Exec(`
+			DELETE FROM tasks_queued
+			WHERE created_at < unixepoch('now', '-' || ? || ' days');
+		`, config.TasksRetentionDays)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return db, nil
 }
 
@@ -511,10 +526,10 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			FROM   tasks_queued 
 			WHERE  finished_at IS NOT NULL
 			AND    result_sent_at IS NULL
-			AND    send_retries < 5
+			AND    send_retries < ?
 			ORDER BY id ASC
 			LIMIT  1
-		`).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
+		`, config.RetriesThreshold).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				// No tasks ready to process right now; safely skip
@@ -669,6 +684,9 @@ type AppConfig struct {
 	Verbose_Level          string `toml:"verbose_level"`
 	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
 	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
+	RetriesThreshold       int    `toml:"retries_threshold"`
+	TasksRetention         bool   `toml:"tasks_retention"`
+	TasksRetentionDays     int    `toml:"tasks_retention_days"`
 }
 
 var config AppConfig
