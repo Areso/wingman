@@ -407,7 +407,12 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		var id int64
 		var pluginID string
 		var paramsRaw sql.NullString
-		err := db.QueryRow("SELECT id, plugin_id, params FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1").Scan(&id, &pluginID, &paramsRaw)
+		err := db.QueryRow(`
+			SELECT id, plugin_id, params
+			FROM   tasks_queued
+			WHERE  invoked_at IS NULL
+			ORDER  BY id ASC 
+			LIMIT  1`).Scan(&id, &pluginID, &paramsRaw)
 		if err != nil {
 			if err != sql.ErrNoRows {
 				log.Printf("error querying queued tasks: %v", err)
@@ -532,7 +537,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			WHERE  finished_at IS NOT NULL
 			AND    result_sent_at IS NULL
 			AND    send_retries < ?
-			ORDER BY id ASC
+			ORDER  BY id ASC
 			LIMIT  1
 		`, config.RetriesThreshold).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
 		if err != nil {
