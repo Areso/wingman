@@ -1,5 +1,5 @@
-host = "127.0.0.1"
-port = 8089
+core_host = "127.0.0.1"
+core_port = 8089
 # DEBUG, INFO, WARNING
 verbose_level = "DEBUG"
 is_core_rest_protected = true

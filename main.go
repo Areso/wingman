@@ -598,8 +598,8 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 }
 
 type AppConfig struct {
-	Host                   string `toml:"host"`
-	Port                   int    `toml:"port"`
+	Host                   string `toml:"core_host"`
+	Port                   int    `toml:"core_port"`
 	Verbose_Level          string `toml:"verbose_level"`
 	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
 	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`

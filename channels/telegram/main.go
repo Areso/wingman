@@ -78,6 +78,8 @@ type Bot struct {
 }
 
 type CoreConfig struct {
+	Host                   string `toml:"core_host"`
+	Port                   int    `toml:"core_port"`
 	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
 	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
 }
@@ -353,9 +355,7 @@ func (b *Bot) start() error {
 	// Set up message handler
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-
 	updates := b.api.GetUpdatesChan(u)
-
 	for update := range updates {
 		if update.Message != nil {
 			b.handleMessage(update.Message)
@@ -363,7 +363,6 @@ func (b *Bot) start() error {
 			b.handleCallback(update.CallbackQuery)
 		}
 	}
-
 	return nil
 }
 
@@ -375,7 +374,6 @@ func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	if b.rest_secret != nil && *b.rest_secret != "" {
 		authHeader := r.Header.Get("Authorization")
-
 		// Using standard Bearer token format ("Authorization: Bearer <secret>")
 		const prefix = "Bearer "
 		if !strings.HasPrefix(authHeader, prefix) || authHeader[len(prefix):] != *b.rest_secret {
@@ -598,16 +596,6 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 // invokePlugin sends a request to queue a plugin task on the wingman core
 func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_with string, inv_by string) error {
-	var wingman_config struct {
-		Host string `toml:"wingman_host"`
-		Port int    `toml:"wingman_port"`
-	}
-	if _, err := toml.DecodeFile("config.toml", &wingman_config); err != nil {
-		log.Printf("Failed to read config.toml: %v", err)
-		log.Print("Using default host 127.0.0.1 and port 8089")
-		wingman_config.Host = "127.0.0.1"
-		wingman_config.Port = 8089
-	}
 	// Queue the task on the wingman core
 	queueReq := QueueTaskRequest{
 		PluginID: pluginID,
@@ -619,7 +607,7 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_wit
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
-	url := fmt.Sprintf("http://%s:%d/queue_add_task", wingman_config.Host, wingman_config.Port)
+	url := fmt.Sprintf("http://%s:%d/queue_add_task", core_config.Host, core_config.Port)
 	log.Printf("Queuing task on wingman: %s", url)
 	httpReq, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
 	if err != nil {
@@ -770,18 +758,13 @@ func loadSecretForCore() (string, SecretSource, error) {
 }
 
 func main() {
-	// Load config from file or use defaults
 	var config struct {
 		Host string `toml:"comm_telegram_host"`
 		Port int    `toml:"comm_telegram_port"`
 	}
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
-		log.Printf("Failed to read config.toml: %v", err)
-		log.Print("Using default host 127.0.0.1 and port 8085")
-		config.Host = "127.0.0.1"
-		config.Port = 8085
+		log.Fatalf("Failed to read config.toml: %v", err)
 	}
-	// TODO fix relative path
 	execPath, err := os.Executable()
 	if err != nil {
 		log.Fatalf("Failed to get executable path: %v", err)
