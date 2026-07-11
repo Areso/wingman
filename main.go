@@ -435,14 +435,14 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		cancel() // Always call cancel to release resources!
 	}
 }
-func markTaskAsSended(db *sql.DB, taskID int64) {
+func markTaskAsSent(db *sql.DB, taskID int64) {
 	now := time.Now().UTC().Unix()
-	// otherwise we would get this exactly task indefinetly
+	// otherwise we would get this exactly task indefinitely
 	_, err := db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, taskID)
 	if err != nil {
 		log.Fatalf("error updating result_sent_at for task %d: %v", taskID, err)
 	} else {
-		// otherwise we would get this exactly task indefinetly by the SELECT in the start of this function
+		// otherwise we would get this exactly task indefinitely by the SELECT in the start of this function
 		log.Printf("updated result_sent_at successfully %d", taskID)
 	}
 }
@@ -470,7 +470,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 				// No tasks ready to process right now; safely skip
 				continue
 			}
-			log.Printf("Some error from Quering inside processFinishedTasks: %v", err)
+			log.Printf("Some error from while perform SELECT task inside processFinishedTasks: %v", err)
 			continue
 		}
 
@@ -499,7 +499,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			// it means the result is empty after removing whitespace
 			// rc 0 - finished correctly
 			// and was invoked by Cron
-			markTaskAsSended(db, id)
+			markTaskAsSent(db, id)
 			continue
 		}
 		channel_to_use_obj, ok := channels[invokedWith]
@@ -534,7 +534,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			c, ok := channels[channel_to_use]
 			if !ok {
 				log.Printf("we have no real target to send the result to, including no default channel defined")
-				markTaskAsSended(db, id)
+				markTaskAsSent(db, id)
 				continue
 			}
 			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
@@ -545,14 +545,14 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 				channel_call_res = sendResult(&c, nil, result, id)
 			}
 			if channel_call_res == 0 {
-				markTaskAsSended(db, id)
+				markTaskAsSent(db, id)
 			} else {
 				log.Printf("the call to the channel service returned error")
 				continue
 			}
 		} else {
 			log.Printf("we have no real target to send the result to, including no default channel defined")
-			markTaskAsSended(db, id)
+			markTaskAsSent(db, id)
 			continue
 		}
 	}
