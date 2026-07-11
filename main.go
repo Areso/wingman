@@ -275,7 +275,8 @@ func matchesCron(expr string, t time.Time) bool {
 }
 
 func initDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path)
+	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", path)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +285,7 @@ func initDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
 
+	db.SetMaxOpenConns(1)
 	// invoked_with cron, telegram, email
 	// cron N/A,chat_id, email
 	_, err = db.Exec(`
@@ -407,16 +409,28 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		var id int64
 		var pluginID string
 		var paramsRaw sql.NullString
-		err := db.QueryRow(`
-			SELECT id, plugin_id, params
-			FROM   tasks_queued
-			WHERE  invoked_at IS NULL
-			ORDER  BY id ASC 
-			LIMIT  1`).Scan(&id, &pluginID, &paramsRaw)
+		now := time.Now().UTC().Unix()
+
+		// could introduce worker_id if I ever do it multithread
+		query := `
+			UPDATE tasks_queued
+			SET    invoked_at = ?
+			WHERE  id = (
+				SELECT id 
+				FROM   tasks_queued 
+				WHERE  invoked_at IS NULL 
+				ORDER  BY id ASC 
+				LIMIT  1
+			)
+			RETURNING id, plugin_id, params;`
+
+		err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
 		if err != nil {
-			if err != sql.ErrNoRows {
-				log.Printf("error querying queued tasks: %v", err)
+			if err == sql.ErrNoRows {
+				// No tasks queued, totally fine
+				continue
 			}
+			log.Printf("error claiming queued task: %v", err)
 			continue
 		}
 		// Get plugin
@@ -425,13 +439,7 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			log.Printf("plugin %s not found for queued task %d", pluginID, id)
 			continue
 		}
-		// Mark as invoked
-		now := time.Now().UTC().Unix()
-		_, err = db.Exec("UPDATE tasks_queued SET invoked_at = ? WHERE id = ?", now, id)
-		if err != nil {
-			log.Printf("error updating invoked_at for task %d: %v", id, err)
-			continue
-		}
+
 		// Execute plugin
 		params := make(map[string]string)
 		if paramsRaw.Valid && paramsRaw.String != "" {
@@ -480,13 +488,13 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		}
 		finishTime := time.Now().UTC().Unix()
 		result := stdout.String() + "\n" + stderr.String()
-		query := `
+		query2 := `
 		UPDATE tasks_queued 
 		SET finished_at = ?, 
 			result = ?,
 			rc     = ? 
 		WHERE id = ?`
-		_, err = db.Exec(query, finishTime, result, rc, id)
+		_, err = db.Exec(query2, finishTime, result, rc, id)
 		if err != nil {
 			log.Printf("error updating finished_at for task %d: %v", id, err)
 		}

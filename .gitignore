@@ -1,2 +1,4 @@
 wingman
 wingman.db
+wingman.db-shm
+wingman.db-wal
