@@ -31,8 +31,6 @@ Please note, there should be only ONE user with 'owner' value and is_default 1 v
 Other supported roles are: "guest" (but you don't need to add guests to the database) and "user" (these should be added with <CHAT_ID>,'user',0 values)   
 
 Finally, check `config.toml` for host and port settings both for the channel/telegram and Wingman (Core)
-## Usage
 
-- Send `/start` or `/help` to see the plugin menu
-- Click on plugin buttons to execute them
-- Send `/plugins` to see a list of available plugins
+## Known trade-offs
+1) config.toml, which is needed for the channel/telegram could have the same properties as channel.json, because channel.json is a contract of the channel exposed to the Core. As for example, this is why they both have port and address (and the values should be the same)
