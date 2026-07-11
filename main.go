@@ -300,6 +300,22 @@ func initDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// COVER processQueuedTasks SELECT
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_tasks_queued_invoked_at ON tasks_queued(invoked_at)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	// COVERS processFinishedTasks SELECT
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_tasks_queued_finished_at ON tasks_queued(finished_at)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS wingman_settings (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
