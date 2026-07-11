@@ -69,3 +69,5 @@ INSERT INTO known_ids (chat_id, role, is_default) VALUES (<CHANGENUMBER>, "owner
 ## Known tradeoffs
 1. If a task was invoked but failed to run, it will never be invoked again. This no-retry logic is tied to `SELECT * FROM tasks_queued WHERE invoked_at IS NULL LIMIT 1` to prevent endless loops.
 2. The very first cron check-up happens after waiting for the first loop iteration, so it could omit a task planned for the exact minute the application started. This is unlikely to happen in real-life. Furthermore, since the task is scheduled, it will trigger next time. To keep things simple, I am temporarily okay with that.
+3. Invocation of plugins should not pass to the plugins any secrets. They are not meant to be send as part of the invocation. The Wingman Core should not handle secrets for the plugins, nor should user pass secrets as part of parameters / user input
+4. The plugins output should not put secrets to STDOUT or STDERR, since that would be recorded by Wingman Core and then sent as a result to the user utilizing channels.
