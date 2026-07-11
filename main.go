@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -293,7 +294,8 @@ func initDB(path string) (*sql.DB, error) {
 			finished_at INTEGER,
 			result TEXT,
 			rc INTEGER,
-			result_sent_at INTEGER
+			result_sent_at INTEGER,
+			send_retries INTEGER
 		)
 	`)
 	if err != nil {
@@ -314,6 +316,24 @@ func initDB(path string) (*sql.DB, error) {
 	`)
 	if err != nil {
 		return nil, err
+	}
+
+	var count int
+	// Returns 1 if column exists, 0 if it doesn't
+	err = db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM pragma_table_info('tasks_queued') 
+		WHERE name = 'send_retries'
+	`).Scan(&count)
+	if err != nil {
+		return nil, err
+	}
+	// Only add it if the count is 0
+	if count == 0 {
+		_, err = db.Exec(`ALTER TABLE tasks_queued ADD COLUMN send_retries INTEGER DEFAULT 0`)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	_, err = db.Exec(`
@@ -453,15 +473,27 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 }
 func markTaskAsSent(db *sql.DB, taskID int64) {
 	now := time.Now().UTC().Unix()
-	// otherwise we would get this exactly task indefinitely
 	_, err := db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, taskID)
 	if err != nil {
 		log.Fatalf("error updating result_sent_at for task %d: %v", taskID, err)
 	} else {
-		// otherwise we would get this exactly task indefinitely by the SELECT in the start of this function
-		log.Printf("updated result_sent_at successfully %d", taskID)
+		if verbosity == "DEBUG" {
+			log.Printf("updated result_sent_at successfully %d", taskID)
+		}
 	}
 }
+
+func incrementRetryAttempt(db *sql.DB, taskID int64) {
+	_, err := db.Exec("UPDATE tasks_queued SET send_retries = COALESCE(send_retries, 0) + 1 WHERE id = ?", taskID)
+	if err != nil {
+		log.Fatalf("error updating send_retries for task %d: %v", taskID, err)
+	}
+}
+
+var (
+	brokenChannels = make(map[string]time.Time)
+	channelMux     sync.RWMutex
+)
 
 func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 	for range time.NewTicker(time.Second * 5).C {
@@ -478,7 +510,9 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			SELECT id, invoked_with, invoked_by_id, result, rc 
 			FROM   tasks_queued 
 			WHERE  finished_at IS NOT NULL
-			AND    result_sent_at IS NULL 
+			AND    result_sent_at IS NULL
+			AND    send_retries < 5
+			ORDER BY id ASC
 			LIMIT  1
 		`).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
 		if err != nil {
@@ -544,6 +578,16 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			channel_to_use = channel_to_use_obj.ID
 		}
 		if channel_to_use != "devnull" {
+			// Channel cooldown CHECK logic
+			channelMux.RLock()
+			cooldownUntil, isBroken := brokenChannels[channel_to_use]
+			channelMux.RUnlock()
+			if isBroken && time.Now().Before(cooldownUntil) {
+				// Channel is down! Don't process this task right now.
+				// Leave it in the DB untouched so it doesn't waste its send_retries.
+				continue
+			}
+			// END Of Channel cooldown CHECK logic
 			log.Printf("channel_to_use is %s", channel_to_use)
 			//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
 			invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
@@ -563,7 +607,13 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			if channel_call_res == 0 {
 				markTaskAsSent(db, id)
 			} else {
-				log.Printf("the call to the channel service returned error")
+				incrementRetryAttempt(db, id)
+				log.Printf("the call to the channel %s returned error", channel_to_use)
+				log.Printf("lock the channel %s for 5 minutes", channel_to_use)
+				// LOCK CHANNEL FOR 5 minutes
+				channelMux.Lock()
+				brokenChannels[channel_to_use] = time.Now().Add(5 * time.Minute)
+				channelMux.Unlock()
 				continue
 			}
 		} else {

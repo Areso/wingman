@@ -9,6 +9,6 @@
     "options":[],
     "adhoc":true,
     "cron":true,
-    "cron_time":"* * * * *",
+    "cron_time":"*/15 * * * *",
     "min_allowed_role": "guest"
 }

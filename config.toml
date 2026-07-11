@@ -4,3 +4,4 @@ core_port = 8089
 verbose_level = "DEBUG"
 is_core_rest_protected = true
 core_rest_secret_filename = "core_rest_secret"
+retries_threshold = 5
