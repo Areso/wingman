@@ -554,65 +554,73 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			// it means the result is empty after removing whitespace
 			// rc 0 - finished correctly
 			// and was invoked by Cron
+			// and the setting tells us don't spam with such result
 			markTaskAsSent(db, id)
 			continue
 		}
-		channel_to_use_obj, ok := channels[invokedWith]
-		channel_to_use := ""
+
+		var channelToUse Channel
 		useDefaultRecipient := false
-		if !ok {
-			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
-			default_channel := wingman_settings.DefaultChannel
-			if default_channel != "devnull" {
-				channel_to_use = default_channel
-				useDefaultRecipient = true
-			}
-		} else {
+
+		// Look up the channel by how the task was invoked
+		if channelObj, ok := channels[invokedWith]; ok {
 			log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
-			channel_to_use = channel_to_use_obj.ID
-		}
-		if channel_to_use != "devnull" {
-			// Channel cooldown CHECK logic
-			channelMux.RLock()
-			cooldownUntil, isBroken := brokenChannels[channel_to_use]
-			channelMux.RUnlock()
-			if isBroken && time.Now().Before(cooldownUntil) {
-				// Channel is down! Don't process this task right now.
-				// Leave it in the DB untouched so it doesn't waste its send_retries.
-				continue
-			}
-			// END Of Channel cooldown CHECK logic
-			log.Printf("channel_to_use is %s", channel_to_use)
-			//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
-			invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
-			c, ok := channels[channel_to_use]
-			if !ok {
+			channelToUse = channelObj
+		} else {
+			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
+			defaultChannelStr := wingman_settings.DefaultChannel
+
+			if defaultChannelStr == "devnull" {
 				log.Printf("we have no real target to send the result to, including no default channel defined")
 				markTaskAsSent(db, id)
 				continue
 			}
-			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
-			var channel_call_res int
-			if useDefaultRecipient == false {
-				channel_call_res = sendResult(&c, &invokedByID_int, result, id)
+
+			// Look up the default channel object instead
+			if defaultChannelObj, ok := channels[defaultChannelStr]; ok {
+				channelToUse = defaultChannelObj
+				useDefaultRecipient = true
 			} else {
-				channel_call_res = sendResult(&c, nil, result, id)
-			}
-			if channel_call_res == 0 {
+				log.Printf("we have no real target to send the result to, including no default channel defined")
 				markTaskAsSent(db, id)
-			} else {
-				incrementRetryAttempt(db, id)
-				log.Printf("the call to the channel %s returned error", channel_to_use)
-				log.Printf("lock the channel %s for 5 minutes", channel_to_use)
-				// LOCK CHANNEL FOR 5 minutes
-				channelMux.Lock()
-				brokenChannels[channel_to_use] = time.Now().Add(5 * time.Minute)
-				channelMux.Unlock()
 				continue
 			}
+		}
+
+		// Channel cooldown CHECK logic
+		channelMux.RLock()
+		cooldownUntil, isBroken := brokenChannels[channelToUse.ID]
+		channelMux.RUnlock()
+		if isBroken && time.Now().Before(cooldownUntil) {
+			// Channel is down! Don't process this task right now.
+			continue
+		}
+		// END Of Channel cooldown CHECK logic
+
+		log.Printf("channel_to_use is %s", channelToUse.ID)
+		log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
+
+		//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
+		invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
+
+		var channel_call_res int
+		if !useDefaultRecipient {
+			channel_call_res = sendResult(&channelToUse, &invokedByID_int, result, id)
 		} else {
-			log.Printf("we have no real target to send the result to, including no default channel defined")
+			channel_call_res = sendResult(&channelToUse, nil, result, id)
+		}
+
+		if channel_call_res == 0 {
 			markTaskAsSent(db, id)
+		} else {
+			incrementRetryAttempt(db, id)
+			log.Printf("the call to the channel %s returned error", channelToUse.ID)
+			log.Printf("lock the channel %s for 5 minutes", channelToUse.ID)
+
+			// LOCK CHANNEL FOR 5 minutes
+			channelMux.Lock()
+			brokenChannels[channelToUse.ID] = time.Now().Add(5 * time.Minute)
+			channelMux.Unlock()
 			continue
 		}
 	}
