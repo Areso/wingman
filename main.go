@@ -657,6 +657,7 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 		return -1
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Close = true
 	if len(strings.TrimSpace(channel.Secret)) != 0 {
 		httpReq.Header.Set("Authorization", "Bearer "+channel.Secret)
 	}
@@ -666,7 +667,7 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 		log.Printf("error sending message to the channel for task %d: %v", taskID, err)
 		return -1
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		return 0
 	} else {
