@@ -7,3 +7,4 @@ core_rest_secret_filename = "core_rest_secret"
 retries_threshold = 5
 tasks_retention = true
 tasks_retention_days = 14
+concurrent_tasks_limit = 5

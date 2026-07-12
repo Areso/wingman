@@ -399,8 +399,15 @@ func shellQuote(value string) string {
 }
 
 func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
-	for range time.NewTicker(time.Second).C {
-		// Find queued tasks that haven't been invoked yet
+	// Create a semaphore channel to limit concurrency to N
+	sem := make(chan struct{}, config.ConcurrentTasksLimit)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sem <- struct{}{}
+
+		// Claim a task
 		var id int64
 		var pluginID string
 		var paramsRaw sql.NullString
@@ -421,86 +428,96 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 
 		err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
 		if err != nil {
+			// If there's no task, Core must release our slot immediately
+			// so the next loop tick can try again.
+			<-sem
+
 			if err == sql.ErrNoRows {
-				// No tasks queued, totally fine
-				continue
+				continue // No tasks queued, totally fine
 			}
 			log.Printf("error claiming queued task: %v", err)
 			continue
 		}
-		// Get plugin
-		p, ok := plugins[pluginID]
-		if !ok {
-			log.Printf("plugin %s not found for queued task %d", pluginID, id)
-			continue
-		}
 
-		// Execute plugin
-		params := make(map[string]string)
-		if paramsRaw.Valid && paramsRaw.String != "" {
-			if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
-				log.Printf("error unmarshalling params for task %d: %v", id, err)
+		// creating a background goroutine
+		go func(id int64, pluginID string, paramsRaw sql.NullString) {
+			// Ensure the slot is released back to the semaphore when this task ends
+			defer func() { <-sem }()
+
+			// Get plugin
+			p, ok := plugins[pluginID]
+			if !ok {
+				log.Printf("plugin %s not found for queued task %d", pluginID, id)
+				return
 			}
-		}
-		fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
-		if option := params["option"]; option != "" {
-			fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
-		}
-		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-		// log.Printf("timeout from the plugin.json is %v", timeout)
-		if timeout == 0 {
-			// 0 if plugin.json doesn't have invocation_timeout_s property
-			timeout = 30 * time.Second
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
-		cmd.Dir = p.Dir
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if verbosity >= 3 {
-			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
-		}
-		runErr := cmd.Run()
-		rc := 0
-		if runErr != nil {
-			// Check if the error was caused by a timeout
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				log.Printf("Command timed out after %v", timeout)
-				rc = -1 // RC for timeout (for now)
-			} else {
-				var exitErr *exec.ExitError
-				if errors.As(runErr, &exitErr) {
-					// The command finished with a non-zero exit code
-					rc = exitErr.ExitCode()
-					log.Printf("Command failed with RC: %d", rc)
-				} else {
-					// The command failed to start, or another issue occurred
-					rc = -2 // RC for failed to start (for now)
-					log.Printf("Command failed to execute: %v", runErr)
+
+			// Execute plugin
+			params := make(map[string]string)
+			if paramsRaw.Valid && paramsRaw.String != "" {
+				if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
+					log.Printf("error unmarshalling params for task %d: %v", id, err)
 				}
 			}
-		} else {
-			log.Println("Command finished successfully")
-		}
-		finishTime := time.Now().UTC().Unix()
-		result := stdout.String() + "\n" + stderr.String()
-		query2 := `
-		UPDATE tasks_queued 
-		SET finished_at = ?, 
-			result = ?,
-			rc     = ? 
-		WHERE id = ?`
-		_, err = db.Exec(query2, finishTime, result, rc, id)
-		if err != nil {
-			log.Printf("error updating finished_at for task %d: %v", id, err)
-		}
-		if runErr != nil {
-			log.Printf("error running queued task %d (plugin %s): %v", id, p.ID, runErr)
-		}
-		cancel() // Always call cancel to release resources!
+			fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
+			if option := params["option"]; option != "" {
+				fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
+			}
+			timeout := time.Duration(p.InvocationTimeoutS) * time.Second
+			if timeout == 0 {
+				timeout = 30 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
+			cmd.Dir = p.Dir
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if verbosity >= 3 {
+				log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+			}
+			runErr := cmd.Run()
+			rc := 0
+			if runErr != nil {
+				// Check if the error was caused by a timeout
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					log.Printf("Command timed out after %v", timeout)
+					rc = -1 // RC for timeout (for now)
+				} else {
+					var exitErr *exec.ExitError
+					if errors.As(runErr, &exitErr) {
+						// The command finished with a non-zero exit code
+						rc = exitErr.ExitCode()
+						log.Printf("Command failed with RC: %d", rc)
+					} else {
+						// The command failed to start, or another issue occurred
+						rc = -2 // RC for failed to start (for now)
+						log.Printf("Command failed to execute: %v", runErr)
+					}
+				}
+			} else {
+				log.Println("Command finished successfully")
+			}
+			finishTime := time.Now().UTC().Unix()
+			result := stdout.String() + "\n" + stderr.String()
+			query2 := `
+			UPDATE tasks_queued 
+			SET finished_at = ?, 
+				result = ?,
+				rc     = ? 
+			WHERE id = ?`
+			_, err = db.Exec(query2, finishTime, result, rc, id)
+			if err != nil {
+				log.Printf("error updating finished_at for task %d: %v", id, err)
+			}
+			if runErr != nil {
+				log.Printf("error running queued task %d (plugin %s): %v", id, p.ID, runErr)
+			}
+		}(id, pluginID, paramsRaw)
 	}
 }
+
 func markTaskAsSent(db *sql.DB, taskID int64) {
 	now := time.Now().UTC().Unix()
 	_, err := db.Exec("UPDATE tasks_queued SET result_sent_at = ? WHERE id = ?", now, taskID)
@@ -685,6 +702,7 @@ type AppConfig struct {
 	RetriesThreshold       int    `toml:"retries_threshold"`
 	TasksRetention         bool   `toml:"tasks_retention"`
 	TasksRetentionDays     int    `toml:"tasks_retention_days"`
+	ConcurrentTasksLimit   int    `toml:"concurrent_tasks_limit"`
 }
 
 var config AppConfig
