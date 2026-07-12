@@ -456,7 +456,9 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+		if verbosity >= 3 {
+			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+		}
 		runErr := cmd.Run()
 		rc := 0
 		if runErr != nil {
@@ -564,10 +566,14 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 
 		// Look up the channel by how the task was invoked
 		if channelObj, ok := channels[invokedWith]; ok {
-			log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
+			if verbosity >= 3 {
+				log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
+			}
 			channelToUse = channelObj
 		} else {
-			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
+			if verbosity >= 2 {
+				log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
+			}
 			defaultChannelStr := wingman_settings.DefaultChannel
 
 			if defaultChannelStr == "devnull" {
@@ -597,8 +603,10 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 		}
 		// END Of Channel cooldown CHECK logic
 
-		log.Printf("channel_to_use is %s", channelToUse.ID)
-		log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
+		if verbosity >= 3 {
+			log.Printf("channel_to_use is %s", channelToUse.ID)
+			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
+		}
 
 		//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
 		invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
