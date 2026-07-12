@@ -30,6 +30,8 @@ const (
 	NotSet   SecretSource = "not set"
 )
 
+const devnull string = "devnull"
+
 type Config interface {
 	GetCommon() *CommonConfig
 	Validate() error
@@ -576,7 +578,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			}
 			defaultChannelStr := wingman_settings.DefaultChannel
 
-			if defaultChannelStr == "devnull" {
+			if defaultChannelStr == devnull {
 				log.Printf("we have no real target to send the result to, including no default channel defined")
 				markTaskAsSent(db, id)
 				continue
@@ -734,7 +736,7 @@ func read_wingman_settings(db *sql.DB) {
 			// SHOULD BE FATAL?
 			log.Printf("Can't select default_channel from t wingman_settings: %v", err)
 		}
-		default_channel = "devnull"
+		default_channel = devnull
 	}
 	wingman_settings.DefaultChannel = default_channel
 }
