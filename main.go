@@ -172,16 +172,6 @@ func loadSecretForCore() (string, SecretSource, error) {
 	return strings.TrimSpace(string(secretBytes)), FromFile, nil
 }
 
-var verbosity string
-
-func getVerboseLevel() string {
-	var config AppConfig
-	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
-		panic(err)
-	}
-	return config.Verbose_Level
-}
-
 func (c *Channel) Validate() error {
 	// 1. Validate embedded common rules
 	if err := c.CommonConfig.Validate(); err != nil {
@@ -205,7 +195,7 @@ func (c *Channel) Validate() error {
 	if err != nil {
 		return err
 	}
-	if verbosity == "DEBUG" {
+	if verbosity >= 3 {
 		log.Printf("Channel %s loaded with secret source %s", c.ID, secret_source)
 	}
 	c.Secret = secret
@@ -353,12 +343,15 @@ func initDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if verbosity == "DEBUG" || verbosity == "INFO" {
+	if verbosity >= 3 {
 		log.Printf("config.TasksRetetion is %t", config.TasksRetention)
 	}
 	if config.TasksRetention {
 		if config.TasksRetentionDays < 1 {
 			return nil, fmt.Errorf("Task Retention Days should be >= 1")
+		}
+		if verbosity >= 2 {
+			log.Printf("Deleting older than %d days records", config.TasksRetentionDays)
 		}
 		_, err = db.Exec(`
 			DELETE FROM tasks_queued
@@ -510,7 +503,7 @@ func markTaskAsSent(db *sql.DB, taskID int64) {
 	if err != nil {
 		log.Fatalf("error updating result_sent_at for task %d: %v", taskID, err)
 	} else {
-		if verbosity == "DEBUG" {
+		if verbosity >= 3 {
 			log.Printf("updated result_sent_at successfully %d", taskID)
 		}
 	}
@@ -699,7 +692,7 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 type AppConfig struct {
 	Host                   string `toml:"core_host"`
 	Port                   int    `toml:"core_port"`
-	Verbose_Level          string `toml:"verbose_level"`
+	Verbose_Level          int    `toml:"verbose_level"`
 	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
 	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
 	RetriesThreshold       int    `toml:"retries_threshold"`
@@ -711,12 +704,14 @@ var config AppConfig
 
 var core_rest_secret string
 
+var verbosity int
+
 func main() {
 	// Read config
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
 		log.Fatalf("Failed to read config.toml, using defaults: %v", err)
 	}
-	verbosity = getVerboseLevel()
+	verbosity = config.Verbose_Level
 	db, err := initDB("wingman.db")
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)

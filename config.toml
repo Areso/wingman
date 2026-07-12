@@ -1,7 +1,7 @@
 core_host = "127.0.0.1"
 core_port = 8089
-# DEBUG, INFO, WARNING
-verbose_level = "DEBUG"
+# 3 DEBUG, 2 INFO, 1 WARNING
+verbose_level = 3
 is_core_rest_protected = true
 core_rest_secret_filename = "core_rest_secret"
 retries_threshold = 5
