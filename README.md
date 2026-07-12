@@ -72,4 +72,4 @@ INSERT INTO known_ids (chat_id, role, is_default) VALUES (<CHANGENUMBER>, "owner
 3. Invocation of plugins should not pass to the plugins any secrets. They are not meant to be send as part of the invocation. The Wingman Core should not handle secrets for the plugins, nor should user pass secrets as part of parameters / user input
 4. The plugins output should not put secrets to STDOUT or STDERR, since that would be recorded by Wingman Core and then sent as a result to the user utilizing channels.
 5. Wingman Settings from wingman.db table wingman_settings are read only once on startup: properties send_empty_results, default_channel
- 
+6. While Wingman could run on a laptop, it should be noted, it will not schedule cron tasks during the laptop's sleep. So, it better be runned on always-on box (physical, like a Mac Mini or virtual, like a VPS)
