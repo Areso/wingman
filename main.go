@@ -529,9 +529,6 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 		var result string
 		var rc int32
 
-		var str_send_empty_results string
-		var bl_send_empty_results bool
-
 		err := db.QueryRow(`
 			SELECT id, invoked_with, invoked_by_id, result, rc 
 			FROM   tasks_queued 
@@ -550,25 +547,7 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 			continue
 		}
 
-		err1 := db.QueryRow(`
-			SELECT s_value 
-			FROM   wingman_settings 
-			WHERE  s_key = 'send_empty_results';
-		`).Scan(&str_send_empty_results)
-		// log.Printf("send_empty_results value is %s", str_send_empty_results)
-		if err1 != nil {
-			bl_send_empty_results = false
-		} else {
-			bl_send_empty_results_t, err2 := strconv.ParseBool(str_send_empty_results)
-			bl_send_empty_results = bl_send_empty_results_t
-			if err2 != nil {
-				// Handle the error if the string isn't a valid boolean representation
-				fmt.Println("Error parsing string:", err2)
-				bl_send_empty_results = false
-			}
-		}
-
-		if bl_send_empty_results == false &&
+		if wingman_settings.SendEmptyResults == false &&
 			len(strings.TrimSpace(result)) == 0 &&
 			rc == 0 &&
 			invokedWith == "cron" {
@@ -583,19 +562,8 @@ func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 		useDefaultRecipient := false
 		if !ok {
 			log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
-			var default_channel string
-			err := db.QueryRow(`
-				SELECT s_value FROM wingman_settings 
-				WHERE  s_key='default_channel';
-			`).Scan(&default_channel)
-			if err != nil {
-				if err == sql.ErrNoRows {
-					log.Printf("There is no record in t wingman_settings for s_key is default_channel: %v", err)
-				} else {
-					log.Printf("Can't select default_channel from t wingman_settings: %v", err)
-				}
-				channel_to_use = "devnull"
-			} else {
+			default_channel := wingman_settings.DefaultChannel
+			if default_channel != "devnull" {
 				channel_to_use = default_channel
 				useDefaultRecipient = true
 			}
@@ -702,9 +670,58 @@ type AppConfig struct {
 
 var config AppConfig
 
+type WingmanSettings struct {
+	DefaultChannel   string
+	SendEmptyResults bool
+}
+
+var wingman_settings WingmanSettings
+
 var core_rest_secret string
 
 var verbosity int
+
+func read_wingman_settings(db *sql.DB) {
+	//read send_empty_results property
+	var str_send_empty_results string
+	var bl_send_empty_results bool
+	err1 := db.QueryRow(`
+		SELECT s_value 
+		FROM   wingman_settings 
+		WHERE  s_key = 'send_empty_results';
+	`).Scan(&str_send_empty_results)
+	// log.Printf("send_empty_results value is %s", str_send_empty_results)
+	if err1 != nil {
+		bl_send_empty_results = false
+	} else {
+		bl_send_empty_results_t, err2 := strconv.ParseBool(str_send_empty_results)
+		bl_send_empty_results = bl_send_empty_results_t
+		if err2 != nil {
+			// Handle the error if the string isn't a valid boolean representation
+			fmt.Println("Error parsing string:", err2)
+			bl_send_empty_results = false
+		}
+	}
+	wingman_settings.SendEmptyResults = bl_send_empty_results
+
+	//read defaul_channel property
+	var default_channel string
+	err := db.QueryRow(`
+		SELECT s_value FROM wingman_settings 
+		WHERE  s_key='default_channel';
+	`).Scan(&default_channel)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			//WARNING
+			log.Printf("There is no record in t wingman_settings for s_key is default_channel: %v", err)
+		} else {
+			// SHOULD BE FATAL?
+			log.Printf("Can't select default_channel from t wingman_settings: %v", err)
+		}
+		default_channel = "devnull"
+	}
+	wingman_settings.DefaultChannel = default_channel
+}
 
 func main() {
 	// Read config
@@ -747,6 +764,8 @@ func main() {
 	if source != NotSet {
 		core_rest_secret = secret
 	}
+
+	read_wingman_settings(db)
 
 	// Start the queued task processor
 	go processQueuedTasks(db, pluginsMap)
