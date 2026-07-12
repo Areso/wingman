@@ -436,8 +436,11 @@ func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	msg := tgbotapi.NewMessage(chatID, text)
 	if _, err := b.api.Send(msg); err != nil {
-		log.Printf("failed to send telegram message to chat %d: %v", chatID, err)
-		http.Error(w, fmt.Sprintf("failed to send telegram message: %v", err), http.StatusInternalServerError)
+		log.Printf("CRITICAL: Telegram delivery failed for chat %d: %v", chatID, err)
+
+		// Explicitly bubble up the 502/500 so upstream cron knows the task failed execution
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error(), "status": "dropped"})
 		return
 	}
 
