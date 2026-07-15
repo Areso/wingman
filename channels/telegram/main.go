@@ -157,7 +157,11 @@ func getRole(db *sql.DB, chatID int64) string {
 		WHERE  chat_id = $1
 	`, chatID).Scan(&role)
 	if err != nil {
-		return "guest"
+		if err == sql.ErrNoRows {
+			return "guest" // default level of privileges
+		} else {
+			log.Fatalf("failed to peform select role from the db: %v", err)
+		}
 	}
 	return role
 }

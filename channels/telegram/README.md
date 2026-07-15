@@ -34,3 +34,4 @@ Finally, check `config.toml` for host and port settings both for the channel/tel
 
 ## Known trade-offs
 1) config.toml, which is needed for the channel/telegram could have the same properties as channel.json, because channel.json is a contract of the channel exposed to the Core. As for example, this is why they both have port and address (and the values should be the same)
+2) default level of privileges for non-recognized user is "guest". "user" is somebody known to the system (added to the channel/telegram database), and the "owner" is the only user who has access to scheduled jobs outcome.
