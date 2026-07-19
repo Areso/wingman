@@ -776,6 +776,23 @@ func read_wingman_settings(db *sql.DB) {
 	wingman_settings.DefaultChannel = default_channel
 }
 
+func checkClearToPlanTask(db *sql.DB, plugin_name string) (bool, error) {
+	var number_planned_tasks = 0
+	query := `
+	SELECT count(*) FROM tasks_queued
+	WHERE  invoked_at IS NULL 
+	AND    plugin_id  = $1
+	`
+	err := db.QueryRow(query, plugin_name).Scan(&number_planned_tasks)
+	if err != nil {
+		return false, err
+	}
+	if number_planned_tasks > 0 {
+		return false, nil
+	}
+	return true, nil
+}
+
 func main() {
 	// Read config
 	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
@@ -886,6 +903,14 @@ func main() {
 				continue
 			}
 			if matchesCron(p.CronTime, now) {
+				res, err1 := checkClearToPlanTask(db, p.ID)
+				if !res {
+					continue
+				}
+				if err1 != nil {
+					log.Printf("error while checking piled up tasks %v", err1)
+					continue
+				}
 				if _, err := create_task(db, p, "cron", "n/a", nil); err != nil {
 					log.Printf("error creating cron task for %s: %v", p.ID, err)
 				}
