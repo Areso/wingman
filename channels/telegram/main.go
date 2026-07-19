@@ -343,8 +343,6 @@ func (b *Bot) sendPluginOptions(chatID int64, plugin *Plugin) {
 
 // start initializes and starts the bot
 func (b *Bot) start() error {
-	// Set up HTTP endpoint for plugin invocation
-	http.HandleFunc("/invoke_plugin", b.handlePluginInvoke)
 	// Set up HTTP endpoint for sending a message
 	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessage)
 	// Set up HTTP endpoint for sending a message to the default chat
@@ -635,63 +633,6 @@ func (b *Bot) invokePlugin(pluginID string, req PluginInvocationRequest, inv_wit
 		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
-}
-
-// handlePluginInvoke handles HTTP requests to invoke plugins
-func (b *Bot) handlePluginInvoke(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if b.rest_secret != nil && *b.rest_secret != "" {
-		authHeader := r.Header.Get("Authorization")
-
-		// Using standard Bearer token format ("Authorization: Bearer <secret>")
-		const prefix = "Bearer "
-		if !strings.HasPrefix(authHeader, prefix) || authHeader[len(prefix):] != *b.rest_secret {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-	var req PluginInvocationRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-	// Find plugin
-	plugin, exists := b.plugins[req.ID]
-	if !exists {
-		http.Error(w, "Plugin not found", http.StatusNotFound)
-		return
-	}
-	if !pluginAllowed("guest", plugin) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	// For demonstration purposes, we just log the invocation
-	log.Printf("Plugin %s invoked with params: %v", req.ID, req.Params)
-	// Here you would actually invoke the plugin
-
-	// Make HTTP request to wingman to invoke the plugin
-	if err := b.invokePlugin(req.ID, req, "HTTP endpoint", "n/a"); err != nil {
-		log.Printf("Error invoking plugin %s: %v", req.ID, err)
-		http.Error(w, fmt.Sprintf("Error invoking plugin: %v", err), http.StatusInternalServerError)
-		return
-	}
-	// For now, we'll simulate it with a message
-	// Note: Since this is an HTTP endpoint, we don't have direct access to user context
-	// This is a simplified version - in practice, you'd want to implement proper user tracking
-	log.Printf("Plugin %s invoked with parameters: %v", req.ID, req.Params)
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Plugin invoked successfully"))
 }
 
 func readFile(secretPath string) (string, error) {
