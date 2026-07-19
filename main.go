@@ -65,6 +65,7 @@ type Plugin struct {
 	Cron               bool   `json:"cron"`
 	CronTime           string `json:"cron_time"`
 	MinAllowedRole     string `json:"min_allowed_role"`
+	UserInput          bool   `json:"user_input"`
 }
 
 func (p *Plugin) Validate() error {
@@ -93,11 +94,6 @@ func (p *Plugin) Validate() error {
 		if _, err := cron.ParseStandard(p.CronTime); err != nil {
 			return fmt.Errorf("field 'cron_time' has incorrect value: %w", err)
 		}
-	}
-	expr := p.CronTime
-	_, err := cron.ParseStandard(expr)
-	if err != nil {
-		return errors.New("field 'cron_time' has incorrect value")
 	}
 	switch p.MinAllowedRole {
 	case "guest", "user", "owner":

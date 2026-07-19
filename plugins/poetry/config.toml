@@ -1,0 +1,15 @@
+[poetry_plugin]
+# Route between a local model and a hosted one. Set to "ollama" or "openrouter".
+provider = "ollama"
+temperature = 0.8
+
+[poetry_plugin.ollama]
+# Ollama's OpenAI-compatible endpoint. No API key needed (local, deterministic to install).
+base_url = "http://localhost:11434/v1"
+#model = "qwen3.5:9B"
+model = "gemma4:E4B"
+
+[poetry_plugin.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+model = "openai/gpt-4o-mini"
+secret_path = "~/.wingman/plugins/openrouter"

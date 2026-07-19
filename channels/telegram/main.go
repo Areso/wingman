@@ -34,6 +34,7 @@ type Plugin struct {
 	CronTime           string   `json:"cron_time"`
 	Dir                string
 	MinAllowedRole     string `json:"min_allowed_role"`
+	UserInput          bool   `json:"user_input"`
 }
 
 // PluginInvocationRequest represents the request to invoke a plugin
@@ -69,12 +70,13 @@ type QueueTaskRequest struct {
 
 // Bot holds the telegram bot state
 type Bot struct {
-	api         *tgbotapi.BotAPI
-	plugins     map[string]*Plugin
-	port        int
-	host        string
-	db          *sql.DB
-	rest_secret *string
+	api          *tgbotapi.BotAPI
+	plugins      map[string]*Plugin
+	port         int
+	host         string
+	db           *sql.DB
+	rest_secret  *string
+	pendingInput map[int64]string // chatID -> pluginID waiting for user input
 }
 
 type CoreConfig struct {
@@ -92,10 +94,11 @@ func newBot(token string, port int, host string) (*Bot, error) {
 	}
 
 	return &Bot{
-		api:     api,
-		plugins: make(map[string]*Plugin),
-		port:    port,
-		host:    host,
+		api:          api,
+		plugins:      make(map[string]*Plugin),
+		port:         port,
+		host:         host,
+		pendingInput: make(map[int64]string),
 	}, nil
 }
 
@@ -229,13 +232,13 @@ func (p *Plugin) Validate() error {
 		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
 	}
 	// Validate cron timing string if cron is enabled
-	if p.Cron && strings.TrimSpace(p.CronTime) == "" {
-		return errors.New("field 'cron_time' cannot be empty when cron is enabled")
-	}
-	expr := p.CronTime
-	_, err := cron.ParseStandard(expr)
-	if err != nil {
-		return errors.New("field 'cron_time' has incorrect value")
+	if p.Cron {
+		if strings.TrimSpace(p.CronTime) == "" {
+			return errors.New("field 'cron_time' cannot be empty when cron is enabled")
+		}
+		if _, err := cron.ParseStandard(p.CronTime); err != nil {
+			return fmt.Errorf("field 'cron_time' has incorrect value: %w", err)
+		}
 	}
 	switch p.MinAllowedRole {
 	case "guest", "user", "owner":
@@ -488,14 +491,59 @@ func (b *Bot) sendPluginList(chatID int64) {
 
 // handleMessage handles incoming messages
 func (b *Bot) handleMessage(message *tgbotapi.Message) {
-	if !message.IsCommand() {
+	if message.IsCommand() {
+		switch message.Command() {
+		case "start":
+			role := getRole(b.db, message.Chat.ID)
+			log.Printf("Chat %d has role %s", message.Chat.ID, role)
+			b.sendMainMenu(message.Chat.ID, role)
+		}
 		return
 	}
-	switch message.Command() {
-	case "start":
-		role := getRole(b.db, message.Chat.ID)
-		log.Printf("Chat %d has role %s", message.Chat.ID, role)
-		b.sendMainMenu(message.Chat.ID, role)
+
+	// Handle text input for plugins waiting for user input
+	if pluginID, waiting := b.pendingInput[message.Chat.ID]; waiting {
+		plugin, exists := b.plugins[pluginID]
+		if !exists {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Plugin not found")
+			b.api.Send(msg)
+			return
+		}
+		if !b.authorizePlugin(message.Chat.ID, plugin) {
+			return
+		}
+
+		// Clear the pending input
+		delete(b.pendingInput, message.Chat.ID)
+
+		userInput := strings.TrimSpace(message.Text)
+		if userInput == "" {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "Empty input, please try again")
+			b.api.Send(msg)
+			return
+		}
+
+		req := PluginInvocationRequest{
+			ID: pluginID,
+			Params: map[string]string{
+				"option": userInput,
+			},
+		}
+
+		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Invoking %s with \"%s\"...", plugin.Name, userInput))
+		b.api.Send(msg)
+
+		chatIDStr := strconv.FormatInt(message.Chat.ID, 10)
+		if err := b.invokePlugin(pluginID, req, "telegram", chatIDStr); err != nil {
+			log.Printf("Error invoking plugin %s: %v", pluginID, err)
+			msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
+			b.api.Send(msg)
+			return
+		}
+
+		msg = tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Plugin %s invoked successfully!", plugin.Name))
+		b.api.Send(msg)
+		return
 	}
 }
 
@@ -572,6 +620,14 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 	}
 	if len(plugin.Options) > 0 {
 		b.sendPluginOptions(callback.Message.Chat.ID, plugin)
+		return
+	}
+
+	// Check if plugin requires text input from user
+	if plugin.UserInput {
+		b.pendingInput[callback.Message.Chat.ID] = pluginID
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Please enter the topic for %s:", plugin.Name))
+		b.api.Send(msg)
 		return
 	}
 

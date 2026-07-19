@@ -1,0 +1,13 @@
+{
+    "id":"write_poetry",
+    "name":"Write poetry",
+    "enabled":true,
+    "invocation_with":"source .venv/bin/activate; python3",
+    "invocation_file":"poetry.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 45,
+    "adhoc":true,
+    "cron":false,
+    "min_allowed_role": "guest",
+    "user_input": true
+}
