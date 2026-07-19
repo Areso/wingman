@@ -398,6 +398,76 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
+// Helper to isolate execution logic and guarantee we return valid DB values
+func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql.NullString, id int64) (string, int, error) {
+	// Check if plugin exists
+	p, ok := plugins[pluginID]
+	if !ok {
+		err := fmt.Errorf("plugin %s not found", pluginID)
+		return err.Error(), -3, err // Using -3 for configuration errors
+	}
+
+	// Parse params
+	params := make(map[string]string)
+	if paramsRaw.Valid && paramsRaw.String != "" {
+		if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
+			errWrap := fmt.Errorf("error unmarshalling params: %w", err)
+			return errWrap.Error(), -4, errWrap // Using -4 for malformed input data
+		}
+	}
+
+	// Build command string
+	fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
+	if option := params["option"]; option != "" {
+		fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
+	}
+
+	// Manage timeout
+	timeout := time.Duration(p.InvocationTimeoutS) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
+	cmd.Dir = p.Dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if verbosity >= 3 {
+		log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+	}
+
+	runErr := cmd.Run()
+	rc := 0
+
+	if runErr != nil {
+		// Check if the error was caused by a timeout
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			log.Printf("Command timed out after %v", timeout)
+			rc = -1 // RC for timeout (for now)
+		} else {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				// The command finished with a non-zero exit code
+				rc = exitErr.ExitCode()
+				log.Printf("Command failed with RC: %d", rc)
+			} else {
+				// The command failed to start, or another issue occurred
+				rc = -2 // RC for failed to start (for now)
+				log.Printf("Command failed to execute: %v", runErr)
+			}
+		}
+	} else {
+		log.Println("Command finished successfully")
+	}
+
+	output := stdout.String() + "\n" + stderr.String()
+	return output, rc, runErr
+}
+
 func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 	// Create a semaphore channel to limit concurrency to N
 	sem := make(chan struct{}, config.ConcurrentTasksLimit)
@@ -444,75 +514,25 @@ func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
 			// Ensure the slot is released back to the semaphore when this task ends
 			defer func() { <-sem }()
 
-			// Get plugin
-			p, ok := plugins[pluginID]
-			if !ok {
-				log.Printf("plugin %s not found for queued task %d", pluginID, id)
-				return
-			}
+			// 1. Execute the task logic and capture the outcome
+			result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
 
-			// Execute plugin
-			params := make(map[string]string)
-			if paramsRaw.Valid && paramsRaw.String != "" {
-				if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
-					log.Printf("error unmarshalling params for task %d: %v", id, err)
-				}
-			}
-			fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
-			if option := params["option"]; option != "" {
-				fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
-			}
-			timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-			if timeout == 0 {
-				timeout = 30 * time.Second
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
-			cmd.Dir = p.Dir
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-			if verbosity >= 3 {
-				log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
-			}
-			runErr := cmd.Run()
-			rc := 0
-			if runErr != nil {
-				// Check if the error was caused by a timeout
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					log.Printf("Command timed out after %v", timeout)
-					rc = -1 // RC for timeout (for now)
-				} else {
-					var exitErr *exec.ExitError
-					if errors.As(runErr, &exitErr) {
-						// The command finished with a non-zero exit code
-						rc = exitErr.ExitCode()
-						log.Printf("Command failed with RC: %d", rc)
-					} else {
-						// The command failed to start, or another issue occurred
-						rc = -2 // RC for failed to start (for now)
-						log.Printf("Command failed to execute: %v", runErr)
-					}
-				}
-			} else {
-				log.Println("Command finished successfully")
-			}
+			// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
 			finishTime := time.Now().UTC().Unix()
-			result := stdout.String() + "\n" + stderr.String()
 			query2 := `
-			UPDATE tasks_queued 
-			SET finished_at = ?, 
-				result = ?,
-				rc     = ? 
-			WHERE id = ?`
+				UPDATE tasks_queued 
+				SET    finished_at = ?, 
+					result = ?,
+					rc     = ? 
+				WHERE  id = ?`
+
 			_, err = db.Exec(query2, finishTime, result, rc, id)
 			if err != nil {
 				log.Printf("error updating finished_at for task %d: %v", id, err)
 			}
+
 			if runErr != nil {
-				log.Printf("error running queued task %d (plugin %s): %v", id, p.ID, runErr)
+				log.Printf("task %d failed/aborted: %v", id, runErr)
 			}
 		}(id, pluginID, paramsRaw)
 	}
