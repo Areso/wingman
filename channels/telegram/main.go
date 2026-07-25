@@ -281,6 +281,7 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read plugins directory: %w", err)
 	}
+	pattern := "plugin*.json"
 
 	seenIDs := make(map[string]bool)
 	for _, entry := range entries {
@@ -288,40 +289,48 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 			continue
 		}
 
-		path := filepath.Join(pluginsDir, entry.Name(), "plugin.json")
-		data, err := os.ReadFile(path)
+		// 1. Expand the wildcard pattern (e.g. plugins/bazaraki/plugin*.json)
+		matches, err := filepath.Glob(filepath.Join(pluginsDir, entry.Name(), pattern))
 		if err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
+			log.Printf("invalid pattern for %s: %v", entry.Name(), err)
 			continue
 		}
 
-		var p Plugin
-		if err := json.Unmarshal(data, &p); err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
-			continue
-		}
-		if !p.Enabled {
-			continue
-		}
+		for _, path := range matches {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				log.Printf("skipping %s: %v", entry.Name(), err)
+				continue
+			}
 
-		id := strings.TrimSpace(p.ID)
-		if seenIDs[id] {
-			log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
-			continue
-		}
-		seenIDs[id] = true
+			var p Plugin
+			if err := json.Unmarshal(data, &p); err != nil {
+				log.Printf("skipping %s: %v", entry.Name(), err)
+				continue
+			}
+			if !p.Enabled {
+				continue
+			}
 
-		p.Dir = filepath.Join(pluginsDir, entry.Name())
+			id := strings.TrimSpace(p.ID)
+			if seenIDs[id] {
+				log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
+				continue
+			}
+			seenIDs[id] = true
 
-		if err := p.Validate(); err != nil {
-			// log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
-			log.Fatalf("invalid config %s: %v", entry.Name(), err)
-			continue
-		}
+			p.Dir = filepath.Join(pluginsDir, entry.Name())
 
-		if p.Adhoc {
-			b.plugins[p.ID] = &p
-			log.Printf("Registered ad_hoc plugin: %s (%s)", p.Name, p.ID)
+			if err := p.Validate(); err != nil {
+				// log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
+				log.Fatalf("invalid config %s: %v", entry.Name(), err)
+				continue
+			}
+
+			if p.Adhoc {
+				b.plugins[p.ID] = &p
+				log.Printf("Registered ad_hoc plugin: %s (%s)", p.Name, p.ID)
+			}
 		}
 	}
 

@@ -1,3 +1,5 @@
+# Ignore private plugin
+plugins/bazaraki/
 wingman
 wingman.db
 wingman.db-shm

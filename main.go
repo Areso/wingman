@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -31,6 +32,13 @@ const (
 )
 
 const devnull string = "devnull"
+
+type executionMode string
+
+const (
+	Async executionMode = "async"
+	Sync  executionMode = "sync"
+)
 
 type Config interface {
 	GetCommon() *CommonConfig
@@ -57,15 +65,18 @@ func (c *CommonConfig) Validate() error {
 
 type Plugin struct {
 	CommonConfig
-	Name               string `json:"name"`
-	InvocationWith     string `json:"invocation_with"`
-	InvocationFile     string `json:"invocation_file"`
-	InvocationTimeoutS int32  `json:"invocation_timeout_s"`
-	Adhoc              bool   `json:"adhoc"`
-	Cron               bool   `json:"cron"`
-	CronTime           string `json:"cron_time"`
-	MinAllowedRole     string `json:"min_allowed_role"`
-	UserInput          bool   `json:"user_input"`
+	Name               string   `json:"name"`
+	InvocationWith     string   `json:"invocation_with"`
+	InvocationFile     string   `json:"invocation_file"`
+	InvocationType     string   `json:"invocation_type"`
+	InvocationTimeoutS int32    `json:"invocation_timeout_s"`
+	Adhoc              bool     `json:"adhoc"`
+	Cron               bool     `json:"cron"`
+	CronTime           string   `json:"cron_time"`
+	MinAllowedRole     string   `json:"min_allowed_role"`
+	UserInput          bool     `json:"user_input"`
+	Params             string   `json:"params"`
+	Options            []string `json:"options"`
 }
 
 func (p *Plugin) Validate() error {
@@ -203,7 +214,7 @@ func (c *Channel) Validate() error {
 func loadConfigs[T any, PT interface {
 	*T
 	Config
-}](dir, filename string) ([]T, error) {
+}](dir, pattern string) ([]T, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -214,35 +225,45 @@ func loadConfigs[T any, PT interface {
 		if !entry.IsDir() {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name(), filename)
-		data, err := os.ReadFile(path)
+
+		// 1. Expand the wildcard pattern (e.g. plugins/bazaraki/plugin*.json)
+		matches, err := filepath.Glob(filepath.Join(dir, entry.Name(), pattern))
 		if err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
+			log.Printf("invalid pattern for %s: %v", entry.Name(), err)
 			continue
 		}
-		var item T
-		if err := json.Unmarshal(data, &item); err != nil {
-			log.Printf("skipping %s: %v", entry.Name(), err)
-			continue
+
+		for _, path := range matches {
+			//path := filepath.Join(dir, entry.Name(), path)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				log.Printf("skipping %s: %v", entry.Name(), err)
+				continue
+			}
+			var item T
+			if err := json.Unmarshal(data, &item); err != nil {
+				log.Printf("skipping %s: %v", entry.Name(), err)
+				continue
+			}
+			common := PT(&item).GetCommon()
+			if !common.Enabled {
+				continue
+			}
+			id := strings.TrimSpace(common.ID)
+			if seenIDs[id] {
+				log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
+				continue
+			}
+			seenIDs[id] = true
+			common.Dir = filepath.Join(dir, entry.Name())
+			// Execute validation before appending to the results array
+			if err := PT(&item).Validate(); err != nil {
+				// log.Printf("skipping invalid config %s: %v", entry.Name(), err)
+				log.Fatalf("invalid config %s: %v", entry.Name(), err)
+				continue
+			}
+			result = append(result, item)
 		}
-		common := PT(&item).GetCommon()
-		if !common.Enabled {
-			continue
-		}
-		id := strings.TrimSpace(common.ID)
-		if seenIDs[id] {
-			log.Printf("skipping %s: duplicate ID found '%s'", entry.Name(), id)
-			continue
-		}
-		seenIDs[id] = true
-		common.Dir = filepath.Join(dir, entry.Name())
-		// Execute validation before appending to the results array
-		if err := PT(&item).Validate(); err != nil {
-			// log.Printf("skipping invalid config %s: %v", entry.Name(), err)
-			log.Fatalf("invalid config %s: %v", entry.Name(), err)
-			continue
-		}
-		result = append(result, item)
 	}
 	return result, nil
 }
@@ -418,50 +439,81 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
 	}
 
-	// Manage timeout
-	timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
-	cmd.Dir = p.Dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if verbosity >= 3 {
-		log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
-	}
-
-	runErr := cmd.Run()
-	rc := 0
-
-	if runErr != nil {
-		// Check if the error was caused by a timeout
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			log.Printf("Command timed out after %v", timeout)
-			rc = -1 // RC for timeout (for now)
-		} else {
-			var exitErr *exec.ExitError
-			if errors.As(runErr, &exitErr) {
-				// The command finished with a non-zero exit code
-				rc = exitErr.ExitCode()
-				log.Printf("Command failed with RC: %d", rc)
-			} else {
-				// The command failed to start, or another issue occurred
-				rc = -2 // RC for failed to start (for now)
-				log.Printf("Command failed to execute: %v", runErr)
-			}
+	if p.InvocationType == string(Sync) {
+		// Manage timeout
+		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second
 		}
-	} else {
-		log.Println("Command finished successfully")
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
 
-	output := stdout.String() + "\n" + stderr.String()
-	return output, rc, runErr
+		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
+		cmd.Dir = p.Dir
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if verbosity >= 3 {
+			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+		}
+
+		runErr := cmd.Run()
+		rc := 0
+
+		if runErr != nil {
+			// Check if the error was caused by a timeout
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.Printf("Command timed out after %v", timeout)
+				rc = -1 // RC for timeout (for now)
+			} else {
+				var exitErr *exec.ExitError
+				if errors.As(runErr, &exitErr) {
+					// The command finished with a non-zero exit code
+					rc = exitErr.ExitCode()
+					log.Printf("Command failed with RC: %d", rc)
+				} else {
+					// The command failed to start, or another issue occurred
+					rc = -2 // RC for failed to start (for now)
+					log.Printf("Command failed to execute: %v", runErr)
+				}
+			}
+		} else {
+			log.Println("Command finished successfully")
+		}
+
+		output := stdout.String() + "\n" + stderr.String()
+		return output, rc, runErr
+	} else {
+		// FIX 1: Use background context without a zero-duration timeout (which kills the process immediately)
+		// FIX 2: Do NOT pass ctx to exec.CommandContext if you want a detached background process,
+		// or use context.Background() directly so it outlives the function execution.
+		cmd := exec.Command("bash", "-c", fullCommand)
+		cmd.Dir = p.Dir
+
+		if verbosity >= 3 {
+			log.Printf("invoking background task %d (plugin %s): %s", id, p.ID, fullCommand)
+		}
+
+		// FIX 3: Cleanly disown standard I/O streams or redirect to io.Discard
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+
+		runErr := cmd.Start()
+		if runErr != nil {
+			log.Printf("Command failed to start: %v", runErr)
+			return "", -2, runErr
+		}
+
+		log.Println("Command started in the background successfully")
+
+		// FIX 4: Call Release() so the process doesn't leak memory / wait handles on OS level
+		if err := cmd.Process.Release(); err != nil {
+			log.Printf("Warning: failed to release process resources: %v", err)
+		}
+
+		return "Task started in background", 0, nil
+	}
 }
 
 func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
@@ -805,7 +857,7 @@ func main() {
 	}
 	defer db.Close()
 
-	plugins, err := loadConfigs[Plugin]("plugins", "plugin.json")
+	plugins, err := loadConfigs[Plugin]("plugins", "plugin*.json")
 	if err != nil {
 		log.Fatalf("failed to load plugins: %v", err)
 	}
@@ -911,7 +963,11 @@ func main() {
 					log.Printf("error while checking piled up tasks %v", err1)
 					continue
 				}
-				if _, err := create_task(db, p, "cron", "n/a", nil); err != nil {
+				cronParams := make(map[string]string)
+				if strings.TrimSpace(p.Params) != "" {
+					cronParams["option"] = strings.TrimSpace(p.Params)
+				}
+				if _, err := create_task(db, p, "cron", "n/a", cronParams); err != nil {
 					log.Printf("error creating cron task for %s: %v", p.ID, err)
 				}
 			}
