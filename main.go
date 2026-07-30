@@ -845,10 +845,78 @@ func checkClearToPlanTask(db *sql.DB, plugin_name string) (bool, error) {
 	return true, nil
 }
 
+func validateAppconfig(meta toml.MetaData) error {
+	// Check if the exact key exists in TOML metadata
+	if !meta.IsDefined("core_host") {
+		return fmt.Errorf("field 'core_host' is missing from config.toml")
+	}
+	if strings.TrimSpace(config.Host) == "" {
+		return fmt.Errorf("field 'core_host' cannot be empty")
+	}
+
+	if !meta.IsDefined("core_port") {
+		return fmt.Errorf("field 'core_port' is missing from config.toml")
+	}
+	if config.Port < 1024 || config.Port > 9900 {
+		return fmt.Errorf("field 'core_port' must be between 1024 and 9900 (got %d)", config.Port)
+	}
+
+	if !meta.IsDefined("verbose_level") {
+		return fmt.Errorf("field 'verbose_level' is missing from config.toml")
+	}
+	if config.Verbose_Level < 1 || config.Verbose_Level > 3 {
+		return fmt.Errorf("field 'verbose_level' must be between 1 and 3 (got %d)", config.Verbose_Level)
+	}
+
+	if !meta.IsDefined("is_core_rest_protected") {
+		return fmt.Errorf("field 'is_core_rest_protected' is missing from config.toml")
+	}
+
+	if config.IsRESTProtected {
+		if !meta.IsDefined("core_rest_secret_filename") {
+			return fmt.Errorf("field 'core_rest_secret_filename' is missing from config.toml")
+		}
+		if strings.TrimSpace(config.CoreRESTSecretFilename) == "" {
+			return fmt.Errorf("field 'core_rest_secret_filename' cannot be empty if is_core_rest_protected is true")
+		}
+	}
+
+	if !meta.IsDefined("retries_threshold") {
+		return fmt.Errorf("field 'retries_threshold' is missing from config.toml")
+	}
+	if config.RetriesThreshold < 1 || config.RetriesThreshold > 20 {
+		return fmt.Errorf("field 'retries_threshold' must be between 1 and 20 (got %d)", config.RetriesThreshold)
+	}
+
+	if !meta.IsDefined("tasks_retention") {
+		return fmt.Errorf("field 'tasks_retention' is missing from config.toml")
+	}
+	if config.TasksRetention {
+		if !meta.IsDefined("tasks_retention_days") {
+			return fmt.Errorf("field 'tasks_retention_days' is missing from config.toml")
+		}
+		if config.TasksRetentionDays < 1 || config.TasksRetentionDays > 365 {
+			return fmt.Errorf("field 'tasks_retention_days' must be between 1 and 365 (got %d)", config.TasksRetentionDays)
+		}
+	}
+
+	if !meta.IsDefined("concurrent_tasks_limit") {
+		return fmt.Errorf("field 'concurrent_tasks_limit' is missing from config.toml")
+	}
+	if config.ConcurrentTasksLimit < 1 || config.ConcurrentTasksLimit > 20 {
+		return fmt.Errorf("field 'concurrent_tasks_limit' must be between 1 and 20 (got %d)", config.ConcurrentTasksLimit)
+	}
+	return nil
+}
+
 func main() {
 	// Read config
-	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
-		log.Fatalf("Failed to read config.toml, using defaults: %v", err)
+	meta, err := toml.DecodeFile("config.toml", &config)
+	if err != nil {
+		log.Fatalf("Failed to read config.toml: %v", err)
+	}
+	if err_val_config := validateAppconfig(meta); err_val_config != nil {
+		log.Fatalf("invalid config.toml: %v", err_val_config)
 	}
 	verbosity = config.Verbose_Level
 	db, err := initDB("wingman.db")
