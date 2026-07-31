@@ -771,13 +771,36 @@ func loadSecretForCore() (string, SecretSource, error) {
 	return strings.TrimSpace(string(secretBytes)), FromFile, nil
 }
 
-func main() {
-	var config struct {
-		Host string `toml:"comm_telegram_host"`
-		Port int    `toml:"comm_telegram_port"`
+func validateAppconfig(config ChannelConfig, meta toml.MetaData) error {
+	if !meta.IsDefined("comm_telegram_host") {
+		return fmt.Errorf("field 'comm_telegram_host' is missing from config.toml")
 	}
-	if _, err := toml.DecodeFile("config.toml", &config); err != nil {
+	if strings.TrimSpace(config.Host) == "" {
+		return fmt.Errorf("field 'comm_telegram_host' cannot be empty")
+	}
+	if !meta.IsDefined("comm_telegram_port") {
+		return fmt.Errorf("field 'comm_telegram_port' is missing from config.toml")
+	}
+	if config.Port < 1024 || config.Port > 9900 {
+		return fmt.Errorf("field 'comm_telegram_port' must be between 1024 and 9900 (got %d)", config.Port)
+	}
+
+	return nil
+}
+
+type ChannelConfig struct {
+	Host string `toml:"comm_telegram_host"`
+	Port int    `toml:"comm_telegram_port"`
+}
+
+func main() {
+	var config ChannelConfig
+	meta, err := toml.DecodeFile("config.toml", &config)
+	if err != nil {
 		log.Fatalf("Failed to read config.toml: %v", err)
+	}
+	if errVal := validateAppconfig(config, meta); errVal != nil {
+		log.Fatalf("invalid config.toml: %v", errVal)
 	}
 	execPath, err := os.Executable()
 	if err != nil {
