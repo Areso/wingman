@@ -104,7 +104,8 @@ func newBot(token string, port int, host string) (*Bot, error) {
 
 // initTelegramDB opens (or creates) telegram.db and ensures the known_ids table exists.
 func initTelegramDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path)
+	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", path)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}
