@@ -27,6 +27,7 @@ type Plugin struct {
 	Enabled            bool     `json:"enabled"`
 	InvocationWith     string   `json:"invocation_with"`
 	InvocationFile     string   `json:"invocation_file"`
+	InvocationType     string   `json:"invocation_type"`
 	InvocationTimeoutS int32    `json:"invocation_timeout_s"`
 	Options            []string `json:"options"`
 	Adhoc              bool     `json:"adhoc"`
@@ -228,6 +229,13 @@ func (p *Plugin) Validate() error {
 	}
 	if strings.TrimSpace(p.InvocationFile) == "" {
 		return fmt.Errorf("field 'invocation_file' cannot be empty")
+	}
+	invType := strings.TrimSpace(p.InvocationType)
+	if invType == "" {
+		return errors.New("field 'invocation_type' cannot be empty")
+	}
+	if invType != "sync" && invType != "async" {
+		return errors.New("field 'invocation_type' can have only values sync or async")
 	}
 	if p.InvocationTimeoutS < 0 {
 		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
