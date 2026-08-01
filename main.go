@@ -1073,19 +1073,19 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		go processFinishedTasks(ctx, db, channelsMap)
+		processFinishedTasks(ctx, db, channelsMap)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		go processDataRotation(ctx, db)
+		processDataRotation(ctx, db)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		go scheduleTasks(ctx, db, pluginsMap)
+		scheduleTasks(ctx, db, pluginsMap)
 	}()
 
 	// Set up HTTP endpoints
@@ -1142,6 +1142,6 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	wg.Wait()
 	log.Println("Shutting down gracefully...")
+	wg.Wait()
 }
