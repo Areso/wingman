@@ -100,9 +100,10 @@ func (p *Plugin) Validate() error {
 	if invType != "sync" && invType != "async" {
 		return errors.New("field 'invocation_type' can have only values sync or async")
 	}
-	// (Optional) Check numeric bounds for timeouts
-	if p.InvocationTimeoutS < 0 {
-		return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
+	if invType == "sync" {
+		if p.InvocationTimeoutS < 0 {
+			return fmt.Errorf("invocation_timeout_s must be positive, got %d", p.InvocationTimeoutS)
+		}
 	}
 	// Validate cron timing string if cron is enabled
 	if p.Cron {
