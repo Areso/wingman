@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -545,73 +547,79 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 	}
 }
 
-func processQueuedTasks(db *sql.DB, plugins map[string]Plugin) {
+func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plugin) {
 	// Create a semaphore channel to limit concurrency to N
 	sem := make(chan struct{}, config.ConcurrentTasksLimit)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		sem <- struct{}{}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("processQueuedTasks worker exited")
+			return // would trigger main()'s defer wg.Done()
+		case <-ticker.C:
+			sem <- struct{}{}
 
-		// Claim a task
-		var id int64
-		var pluginID string
-		var paramsRaw sql.NullString
-		now := time.Now().UTC().Unix()
+			// Claim a task
+			var id int64
+			var pluginID string
+			var paramsRaw sql.NullString
+			now := time.Now().UTC().Unix()
 
-		// could introduce worker_id if I ever do it multithread
-		query := `
-			UPDATE tasks_queued
-			SET    invoked_at = ?
-			WHERE  id = (
-				SELECT id 
-				FROM   tasks_queued 
-				WHERE  invoked_at IS NULL 
-				ORDER  BY id ASC 
-				LIMIT  1
-			)
-			RETURNING id, plugin_id, params;`
+			// could introduce worker_id if I ever do it multithread
+			query := `
+				UPDATE tasks_queued
+				SET    invoked_at = ?
+				WHERE  id = (
+					SELECT id 
+					FROM   tasks_queued 
+					WHERE  invoked_at IS NULL 
+					ORDER  BY id ASC 
+					LIMIT  1
+				)
+				RETURNING id, plugin_id, params;`
 
-		err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
-		if err != nil {
-			// If there's no task, Core must release our slot immediately
-			// so the next loop tick can try again.
-			<-sem
-
-			if err == sql.ErrNoRows {
-				continue // No tasks queued, totally fine
-			}
-			log.Printf("error claiming queued task: %v", err)
-			continue
-		}
-
-		// creating a background goroutine
-		go func(id int64, pluginID string, paramsRaw sql.NullString) {
-			// Ensure the slot is released back to the semaphore when this task ends
-			defer func() { <-sem }()
-
-			// 1. Execute the task logic and capture the outcome
-			result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
-
-			// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
-			finishTime := time.Now().UTC().Unix()
-			query2 := `
-				UPDATE tasks_queued 
-				SET    finished_at = ?, 
-					result = ?,
-					rc     = ? 
-				WHERE  id = ?`
-
-			_, err = db.Exec(query2, finishTime, result, rc, id)
+			err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
 			if err != nil {
-				log.Printf("error updating finished_at for task %d: %v", id, err)
+				// If there's no task, Core must release our slot immediately
+				// so the next loop tick can try again.
+				<-sem
+
+				if err == sql.ErrNoRows {
+					continue // No tasks queued, totally fine
+				}
+				log.Printf("error claiming queued task: %v", err)
+				continue
 			}
 
-			if runErr != nil {
-				log.Printf("task %d failed/aborted: %v", id, runErr)
-			}
-		}(id, pluginID, paramsRaw)
+			// creating a background goroutine
+			go func(id int64, pluginID string, paramsRaw sql.NullString) {
+				// Ensure the slot is released back to the semaphore when this task ends
+				defer func() { <-sem }()
+
+				// 1. Execute the task logic and capture the outcome
+				result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
+
+				// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
+				finishTime := time.Now().UTC().Unix()
+				query2 := `
+					UPDATE tasks_queued 
+					SET    finished_at = ?, 
+						result = ?,
+						rc     = ? 
+					WHERE  id = ?`
+
+				_, err = db.Exec(query2, finishTime, result, rc, id)
+				if err != nil {
+					log.Printf("error updating finished_at for task %d: %v", id, err)
+				}
+
+				if runErr != nil {
+					log.Printf("task %d failed/aborted: %v", id, runErr)
+				}
+			}(id, pluginID, paramsRaw)
+		}
 	}
 }
 
@@ -639,124 +647,176 @@ var (
 	channelMux     sync.RWMutex
 )
 
-func processDataRotation(db *sql.DB) {
+func processDataRotation(ctx context.Context, db *sql.DB) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := rotateData(db); err != nil {
-			log.Printf("error deleting old data from tasks_queued: %v", err)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("processDataRotation worker exited")
+			return
+		case <-ticker.C:
+			if err := rotateData(db); err != nil {
+				log.Printf("error deleting old data from tasks_queued: %v", err)
+			}
 		}
 	}
 }
 
-func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
-	for range time.NewTicker(time.Second * 5).C {
-		var id int64
-		var invokedWith string
-		var invokedByID string
-		var result string
-		var rc int32
+func scheduleTasks(ctx context.Context, db *sql.DB, plugins map[string]Plugin) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 
-		err := db.QueryRow(`
-			SELECT id, invoked_with, invoked_by_id, result, rc 
-			FROM   tasks_queued 
-			WHERE  finished_at IS NOT NULL
-			AND    result_sent_at IS NULL
-			AND    send_retries < ?
-			ORDER  BY id ASC
-			LIMIT  1
-		`, config.RetriesThreshold).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				// No tasks ready to process right now; safely skip
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("scheduleTasks worker exited")
+			return
+		case <-ticker.C:
+			now := time.Now()
+			for _, p := range plugins {
+				if !isCroned(p) {
+					continue
+				}
+				if matchesCron(p.CronTime, now) {
+					res, err1 := checkClearToPlanTask(db, p.ID)
+					if !res {
+						continue
+					}
+					if err1 != nil {
+						log.Printf("error while checking piled up tasks %v", err1)
+						continue
+					}
+					cronParams := make(map[string]string)
+					if strings.TrimSpace(p.Params) != "" {
+						cronParams["option"] = strings.TrimSpace(p.Params)
+					}
+					if _, err := create_task(db, p, "cron", "n/a", cronParams); err != nil {
+						log.Printf("error creating cron task for %s: %v", p.ID, err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func processFinishedTasks(ctx context.Context, db *sql.DB, channels map[string]Channel) {
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("processFinishedTasks worker exited")
+			return
+		case <-ticker.C:
+			var id int64
+			var invokedWith string
+			var invokedByID string
+			var result string
+			var rc int32
+
+			err := db.QueryRow(`
+				SELECT id, invoked_with, invoked_by_id, result, rc 
+				FROM   tasks_queued 
+				WHERE  finished_at IS NOT NULL
+				AND    result_sent_at IS NULL
+				AND    send_retries < ?
+				ORDER  BY id ASC
+				LIMIT  1
+			`, config.RetriesThreshold).Scan(&id, &invokedWith, &invokedByID, &result, &rc)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					// No tasks ready to process right now; safely skip
+					continue
+				}
+				log.Printf("Some error from while perform SELECT task inside processFinishedTasks: %v", err)
 				continue
 			}
-			log.Printf("Some error from while perform SELECT task inside processFinishedTasks: %v", err)
-			continue
-		}
 
-		if wingman_settings.SendEmptyResults == false &&
-			len(strings.TrimSpace(result)) == 0 &&
-			rc == 0 &&
-			invokedWith == "cron" {
-			// it means the result is empty after removing whitespace
-			// rc 0 - finished correctly
-			// and was invoked by Cron
-			// and the setting tells us don't spam with such result
-			markTaskAsSent(db, id)
-			continue
-		}
-
-		var channelToUse Channel
-		useDefaultRecipient := false
-
-		// Look up the channel by how the task was invoked
-		if channelObj, ok := channels[invokedWith]; ok {
-			if verbosity >= 3 {
-				log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
-			}
-			channelToUse = channelObj
-		} else {
-			if verbosity >= 2 {
-				log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
-			}
-			defaultChannelStr := wingman_settings.DefaultChannel
-
-			if defaultChannelStr == devnull {
-				log.Printf("we have no real target to send the result to, including no default channel defined")
+			if wingman_settings.SendEmptyResults == false &&
+				len(strings.TrimSpace(result)) == 0 &&
+				rc == 0 &&
+				invokedWith == "cron" {
+				// it means the result is empty after removing whitespace
+				// rc 0 - finished correctly
+				// and was invoked by Cron
+				// and the setting tells us don't spam with such result
 				markTaskAsSent(db, id)
 				continue
 			}
 
-			// Look up the default channel object instead
-			if defaultChannelObj, ok := channels[defaultChannelStr]; ok {
-				channelToUse = defaultChannelObj
-				useDefaultRecipient = true
+			var channelToUse Channel
+			useDefaultRecipient := false
+
+			// Look up the channel by how the task was invoked
+			if channelObj, ok := channels[invokedWith]; ok {
+				if verbosity >= 3 {
+					log.Printf("channel_to_use_obj was found by the invokedWith, %s", invokedWith)
+				}
+				channelToUse = channelObj
 			} else {
-				log.Printf("we have no real target to send the result to, including no default channel defined")
-				markTaskAsSent(db, id)
+				if verbosity >= 2 {
+					log.Printf("we couldn't find the channel_to_use which was written down as invokedWith, %s", invokedWith)
+				}
+				defaultChannelStr := wingman_settings.DefaultChannel
+
+				if defaultChannelStr == devnull {
+					log.Printf("we have no real target to send the result to, including no default channel defined")
+					markTaskAsSent(db, id)
+					continue
+				}
+
+				// Look up the default channel object instead
+				if defaultChannelObj, ok := channels[defaultChannelStr]; ok {
+					channelToUse = defaultChannelObj
+					useDefaultRecipient = true
+				} else {
+					log.Printf("we have no real target to send the result to, including no default channel defined")
+					markTaskAsSent(db, id)
+					continue
+				}
+			}
+
+			// Channel cooldown CHECK logic
+			channelMux.RLock()
+			cooldownUntil, isBroken := brokenChannels[channelToUse.ID]
+			channelMux.RUnlock()
+			if isBroken && time.Now().Before(cooldownUntil) {
+				// Channel is down! Don't process this task right now.
 				continue
 			}
-		}
+			// END Of Channel cooldown CHECK logic
 
-		// Channel cooldown CHECK logic
-		channelMux.RLock()
-		cooldownUntil, isBroken := brokenChannels[channelToUse.ID]
-		channelMux.RUnlock()
-		if isBroken && time.Now().Before(cooldownUntil) {
-			// Channel is down! Don't process this task right now.
-			continue
-		}
-		// END Of Channel cooldown CHECK logic
+			if verbosity >= 3 {
+				log.Printf("channel_to_use is %s", channelToUse.ID)
+				log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
+			}
 
-		if verbosity >= 3 {
-			log.Printf("channel_to_use is %s", channelToUse.ID)
-			log.Printf("useDefaultRecipient flag value is %t", useDefaultRecipient)
-		}
+			//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
+			invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
 
-		//TODO FIX THAT _ , it would be needed when ID can become not Int but Str (email, discord etc)
-		invokedByID_int, _ := strconv.ParseInt(invokedByID, 10, 64)
+			var channel_call_res int
+			if !useDefaultRecipient {
+				channel_call_res = sendResult(&channelToUse, &invokedByID_int, result, id)
+			} else {
+				channel_call_res = sendResult(&channelToUse, nil, result, id)
+			}
 
-		var channel_call_res int
-		if !useDefaultRecipient {
-			channel_call_res = sendResult(&channelToUse, &invokedByID_int, result, id)
-		} else {
-			channel_call_res = sendResult(&channelToUse, nil, result, id)
-		}
+			if channel_call_res == 0 {
+				markTaskAsSent(db, id)
+			} else {
+				incrementRetryAttempt(db, id)
+				log.Printf("the call to the channel %s returned error", channelToUse.ID)
+				log.Printf("lock the channel %s for 5 minutes", channelToUse.ID)
 
-		if channel_call_res == 0 {
-			markTaskAsSent(db, id)
-		} else {
-			incrementRetryAttempt(db, id)
-			log.Printf("the call to the channel %s returned error", channelToUse.ID)
-			log.Printf("lock the channel %s for 5 minutes", channelToUse.ID)
-
-			// LOCK CHANNEL FOR 5 minutes
-			channelMux.Lock()
-			brokenChannels[channelToUse.ID] = time.Now().Add(5 * time.Minute)
-			channelMux.Unlock()
-			continue
+				// LOCK CHANNEL FOR 5 minutes
+				channelMux.Lock()
+				brokenChannels[channelToUse.ID] = time.Now().Add(5 * time.Minute)
+				channelMux.Unlock()
+				continue
+			}
 		}
 	}
 }
@@ -959,6 +1019,11 @@ func main() {
 		log.Fatalf("invalid config.toml: %v", err_val_config)
 	}
 	verbosity = config.Verbose_Level
+
+	var wg sync.WaitGroup
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	db, err := initDB("wingman.db")
 	if err != nil {
 		log.Fatalf("failed to init db: %v", err)
@@ -998,12 +1063,30 @@ func main() {
 	read_wingman_settings(db)
 
 	// Start the queued task processor
-	go processQueuedTasks(db, pluginsMap)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		processQueuedTasks(ctx, db, pluginsMap)
+	}()
 
-	// Start the telegram results sender
-	go processFinishedTasks(db, channelsMap)
+	// Start the results sender
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go processFinishedTasks(ctx, db, channelsMap)
+	}()
 
-	go processDataRotation(db)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go processDataRotation(ctx, db)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		go scheduleTasks(ctx, db, pluginsMap)
+	}()
 
 	// Set up HTTP endpoints
 
@@ -1058,29 +1141,7 @@ func main() {
 		}
 	}()
 
-	for range time.NewTicker(time.Minute).C {
-		now := time.Now()
-		for _, p := range plugins {
-			if !isCroned(p) {
-				continue
-			}
-			if matchesCron(p.CronTime, now) {
-				res, err1 := checkClearToPlanTask(db, p.ID)
-				if !res {
-					continue
-				}
-				if err1 != nil {
-					log.Printf("error while checking piled up tasks %v", err1)
-					continue
-				}
-				cronParams := make(map[string]string)
-				if strings.TrimSpace(p.Params) != "" {
-					cronParams["option"] = strings.TrimSpace(p.Params)
-				}
-				if _, err := create_task(db, p, "cron", "n/a", cronParams); err != nil {
-					log.Printf("error creating cron task for %s: %v", p.ID, err)
-				}
-			}
-		}
-	}
+	<-ctx.Done()
+	wg.Wait()
+	log.Println("Shutting down gracefully...")
 }
