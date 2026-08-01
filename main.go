@@ -333,6 +333,14 @@ func initDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// COVERS rotateData SELECT
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_tasks_queued_created_at ON tasks_queued(created_at)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
 	// COVERS processFinishedTasks SELECT
 	_, err = db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_tasks_queued_finished_at ON tasks_queued(finished_at)
@@ -345,8 +353,8 @@ func initDB(path string) (*sql.DB, error) {
 	// Returns 1 if column exists, 0 if it doesn't
 	err = db.QueryRow(`
 		SELECT COUNT(*) 
-		FROM pragma_table_info('tasks_queued') 
-		WHERE name = 'send_retries'
+		FROM   pragma_table_info('tasks_queued') 
+		WHERE  name = 'send_retries'
 	`).Scan(&count)
 	if err != nil {
 		return nil, err
@@ -370,25 +378,38 @@ func initDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	if verbosity >= 3 {
-		log.Printf("config.TasksRetetion is %t", config.TasksRetention)
+	err2 := rotateData(db)
+	if err2 != nil {
+		return nil, err2
 	}
+	return db, nil
+}
+
+func rotateData(db *sql.DB) error {
+	if verbosity >= 3 {
+		log.Printf("config.TasksRetention is %t", config.TasksRetention)
+	}
+
 	if config.TasksRetention {
 		if config.TasksRetentionDays < 1 {
-			return nil, fmt.Errorf("Task Retention Days should be >= 1")
+			return fmt.Errorf("Task Retention Days should be >= 1")
 		}
 		if verbosity >= 2 {
 			log.Printf("Deleting older than %d days records", config.TasksRetentionDays)
 		}
-		_, err = db.Exec(`
-			DELETE FROM tasks_queued
-			WHERE created_at < unixepoch('now', '-' || ? || ' days');
-		`, config.TasksRetentionDays)
+
+		modifier := fmt.Sprintf("-%d days", config.TasksRetentionDays)
+		_, err := db.Exec(`
+            DELETE 
+			FROM  tasks_queued
+            WHERE created_at < unixepoch('now', ?);
+        `, modifier)
+
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("failed to delete old queued tasks: %w", err)
 		}
 	}
-	return db, nil
+	return nil
 }
 
 func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params map[string]string) (int64, error) {
@@ -617,6 +638,17 @@ var (
 	brokenChannels = make(map[string]time.Time)
 	channelMux     sync.RWMutex
 )
+
+func processDataRotation(db *sql.DB) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := rotateData(db); err != nil {
+			log.Printf("error deleting old data from tasks_queued: %v", err)
+		}
+	}
+}
 
 func processFinishedTasks(db *sql.DB, channels map[string]Channel) {
 	for range time.NewTicker(time.Second * 5).C {
@@ -970,6 +1002,8 @@ func main() {
 
 	// Start the telegram results sender
 	go processFinishedTasks(db, channelsMap)
+
+	go processDataRotation(db)
 
 	// Set up HTTP endpoints
 
