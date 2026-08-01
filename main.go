@@ -553,73 +553,93 @@ func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plug
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	var tasks sync.WaitGroup
+	defer func() {
+		tasks.Wait()
+		log.Println("processQueuedTasks worker exited")
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("processQueuedTasks worker exited")
 			return // would trigger main()'s defer wg.Done()
 		case <-ticker.C:
-			sem <- struct{}{}
+		}
 
-			// Claim a task
-			var id int64
-			var pluginID string
-			var paramsRaw sql.NullString
-			now := time.Now().UTC().Unix()
+		// Waiting for a free slot must not outlast the shutdown signal
+		select {
+		case <-ctx.Done():
+			return
+		case sem <- struct{}{}:
+		}
 
-			// could introduce worker_id if I ever do it multithread
-			query := `
-				UPDATE tasks_queued
-				SET    invoked_at = ?
-				WHERE  id = (
-					SELECT id 
-					FROM   tasks_queued 
-					WHERE  invoked_at IS NULL 
-					ORDER  BY id ASC 
-					LIMIT  1
-				)
-				RETURNING id, plugin_id, params;`
+		// Either select above can pick its non-ctx case even when ctx is
+		// already done , so don't claim a task without re-checking
+		if ctx.Err() != nil {
+			<-sem
+			return
+		}
 
-			err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
+		// Claim a task
+		var id int64
+		var pluginID string
+		var paramsRaw sql.NullString
+		now := time.Now().UTC().Unix()
+
+		// could introduce worker_id if I ever do it multithread
+		query := `
+			UPDATE tasks_queued
+			SET    invoked_at = ?
+			WHERE  id = (
+				SELECT id 
+				FROM   tasks_queued 
+				WHERE  invoked_at IS NULL 
+				ORDER  BY id ASC 
+				LIMIT  1
+			)
+			RETURNING id, plugin_id, params;`
+
+		err := db.QueryRow(query, now).Scan(&id, &pluginID, &paramsRaw)
+		if err != nil {
+			// If there's no task, Core must release our slot immediately
+			// so the next loop tick can try again.
+			<-sem
+
+			if err == sql.ErrNoRows {
+				continue // No tasks queued, totally fine
+			}
+			log.Printf("error claiming queued task: %v", err)
+			continue
+		}
+
+		tasks.Add(1)
+
+		// creating a background goroutine
+		go func(id int64, pluginID string, paramsRaw sql.NullString) {
+			// Ensure the slot is released back to the semaphore when this task ends
+			defer func() { <-sem }()
+
+			// 1. Execute the task logic and capture the outcome
+			result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
+
+			// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
+			finishTime := time.Now().UTC().Unix()
+			query2 := `
+				UPDATE tasks_queued 
+				SET    finished_at = ?, 
+					result = ?,
+					rc     = ? 
+				WHERE  id = ?`
+
+			_, err = db.Exec(query2, finishTime, result, rc, id)
 			if err != nil {
-				// If there's no task, Core must release our slot immediately
-				// so the next loop tick can try again.
-				<-sem
-
-				if err == sql.ErrNoRows {
-					continue // No tasks queued, totally fine
-				}
-				log.Printf("error claiming queued task: %v", err)
-				continue
+				log.Printf("error updating finished_at for task %d: %v", id, err)
 			}
 
-			// creating a background goroutine
-			go func(id int64, pluginID string, paramsRaw sql.NullString) {
-				// Ensure the slot is released back to the semaphore when this task ends
-				defer func() { <-sem }()
-
-				// 1. Execute the task logic and capture the outcome
-				result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
-
-				// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
-				finishTime := time.Now().UTC().Unix()
-				query2 := `
-					UPDATE tasks_queued 
-					SET    finished_at = ?, 
-						result = ?,
-						rc     = ? 
-					WHERE  id = ?`
-
-				_, err = db.Exec(query2, finishTime, result, rc, id)
-				if err != nil {
-					log.Printf("error updating finished_at for task %d: %v", id, err)
-				}
-
-				if runErr != nil {
-					log.Printf("task %d failed/aborted: %v", id, runErr)
-				}
-			}(id, pluginID, paramsRaw)
-		}
+			if runErr != nil {
+				log.Printf("task %d failed/aborted: %v", id, runErr)
+			}
+		}(id, pluginID, paramsRaw)
 	}
 }
 
