@@ -616,6 +616,7 @@ func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plug
 
 		// creating a background goroutine
 		go func(id int64, pluginID string, paramsRaw sql.NullString) {
+			defer tasks.Done()
 			// Ensure the slot is released back to the semaphore when this task ends
 			defer func() { <-sem }()
 
