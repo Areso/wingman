@@ -489,6 +489,16 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
 		}
 
+		// WOn process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
+		// shutdown must let running tasks finish, not kill them
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		// Because of Setpgid, the deadline has to kill the whole group by hand,
+		// otherwise only bash dies and it's childrent (python3, nc, ...) linger
+		cmd.Cancel = func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		cmd.WaitDelay = 5 * time.Second
+
 		runErr := cmd.Run()
 		rc := 0
 
@@ -1165,5 +1175,20 @@ func main() {
 	<-ctx.Done()
 	stop()
 	log.Println("Shutting down gracefully...")
-	wg.Wait()
+
+	shutdown_timeout := 30 * time.Second
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdown_timeout)
+	defer cancel()
+
+	go func() {
+		wg.Wait()
+		cancel()
+	}()
+
+	<-shutdownCtx.Done()
+	if errors.Is(shutdownCtx.Err(), context.DeadlineExceeded) {
+		log.Println("shutdown timed out, abandoning in-fligt work")
+	} else {
+		log.Println("all workers stopped")
+	}
 }
