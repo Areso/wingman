@@ -1120,8 +1120,9 @@ func main() {
 	}()
 
 	// Set up HTTP endpoints
+	mux := http.NewServeMux()
 
-	http.HandleFunc("/queue_add_task", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/queue_add_task", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -1164,11 +1165,29 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]int64{"id": id})
 	})
 
+	srv := &http.Server{
+		Addr:    fmt.Sprintf("%s:%d", config.Host, config.Port),
+		Handler: mux,
+	}
+
 	go func() {
-		addr := config.Host + ":" + fmt.Sprint(config.Port)
-		log.Printf("Starting HTTP server on %s", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		log.Printf("Starting HTTP server on %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		http_shutdown_timeout := 5 * time.Second
+
+		httpShudownCtx, httpCancel := context.WithTimeout(context.Background(), http_shutdown_timeout)
+		defer httpCancel()
+
+		if err := srv.Shutdown(httpShudownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
 		}
 	}()
 

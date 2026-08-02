@@ -366,13 +366,20 @@ func (b *Bot) sendPluginOptions(chatID int64, plugin *Plugin) {
 
 // start initializes and starts the bot
 func (b *Bot) start() error {
+	mux := http.NewServeMux()
 	// Set up HTTP endpoint for sending a message
-	http.HandleFunc("/send_message_to_chat_id", b.handleSendMessage)
+	mux.HandleFunc("/send_message_to_chat_id", b.handleSendMessage)
 	// Set up HTTP endpoint for sending a message to the default chat
-	http.HandleFunc("/send_message_to_default", b.handleSendMessage)
+	mux.HandleFunc("/send_message_to_default", b.handleSendMessage)
+
+	srv := &http.Server{
+		Addr:    fmt.Sprintf("%s:%d", b.host, b.port),
+		Handler: mux,
+	}
+
 	go func() {
-		log.Printf("Starting HTTP server on %s:%d", b.host, b.port)
-		if err := http.ListenAndServe(fmt.Sprintf("%s:%d", b.host, b.port), nil); err != nil {
+		log.Printf("Starting HTTP server on %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()
