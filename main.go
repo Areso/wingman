@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -489,7 +488,7 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
 		}
 
-		// WOn process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
+		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
 		// shutdown must let running tasks finish, not kill them
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		// Because of Setpgid, the deadline has to kill the whole group by hand,
@@ -532,13 +531,13 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		cmd := exec.Command("bash", "-c", fullCommand)
 		cmd.Dir = p.Dir
 
+		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
+		// shutdown must let running tasks finish, not kill them
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 		if verbosity >= 3 {
 			log.Printf("invoking background task %d (plugin %s): %s", id, p.ID, fullCommand)
 		}
-
-		// FIX 3: Cleanly disown standard I/O streams or redirect to io.Discard
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
 
 		runErr := cmd.Start()
 		if runErr != nil {
@@ -548,10 +547,11 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 
 		log.Println("Command started in the background successfully")
 
-		// FIX 4: Call Release() so the process doesn't leak memory / wait handles on OS level
-		if err := cmd.Process.Release(); err != nil {
-			log.Printf("Warning: failed to release process resources: %v", err)
-		}
+		go func() {
+			if err := cmd.Wait(); err != nil {
+				log.Printf("background task %d exited with error: %v", id, err)
+			}
+		}()
 
 		return "Task started in background", 0, nil
 	}
