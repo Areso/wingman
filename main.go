@@ -1165,20 +1165,5 @@ func main() {
 	<-ctx.Done()
 	stop()
 	log.Println("Shutting down gracefully...")
-
-	shutdown_timeout := 30 * time.Second
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdown_timeout)
-	defer cancel()
-
-	go func() {
-		wg.Wait()
-		cancel()
-	}()
-
-	<-shutdownCtx.Done()
-	if errors.Is(shutdownCtx.Err(), context.DeadlineExceeded) {
-		log.Println("shutdown timed out, abandoning in-fligt work")
-	} else {
-		log.Println("all workers stopped")
-	}
+	wg.Wait()
 }
