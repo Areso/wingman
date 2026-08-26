@@ -1,0 +1,20 @@
+{
+    "id": "manage_ahorita_tasks",
+    "name": "Manage Ahorita tasks",
+    "enabled": true,
+    "invocation_with": "python3",
+    "invocation_file": "ahorita.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 30,
+    "options": [
+        "task_list",
+        "task_list_today",
+        "task_list_tomorrow",
+        "task_get 1",
+        "task_create --title New task"
+    ],
+    "adhoc": true,
+    "cron": false,
+    "min_allowed_role": "owner",
+    "user_input": true
+}

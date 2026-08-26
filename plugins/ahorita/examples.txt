@@ -1,0 +1,6 @@
+python3 ahorita.py task_list
+python3 ahorita.py task_list_today
+python3 ahorita.py task_list_tomorrow
+python3 ahorita.py task_get 42
+python3 ahorita.py task_create --title "Buy milk"
+python3 ahorita.py task_create --title "Submit report" --description "Send the final version" --important --asap --due-at "2026-08-26T14:30"

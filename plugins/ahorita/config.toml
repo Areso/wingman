@@ -1,0 +1,4 @@
+[ahorita_plugin]
+base_url = "https://english.areso.pro/ajoraback/"
+secret_path = "~/.wingman/plugins/ahorita"
+timeout_seconds = 15
