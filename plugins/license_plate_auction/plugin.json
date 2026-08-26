@@ -1,0 +1,14 @@
+{
+    "id": "check_license_plate_auction",
+    "name": "Check for a Cyprus license plate auction",
+    "enabled": true,
+    "invocation_with": "python3",
+    "invocation_file": "main.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 30,
+    "options": [],
+    "adhoc": true,
+    "cron": true,
+    "cron_time": "30 7 * * *",
+    "min_allowed_role": "guest"
+}
