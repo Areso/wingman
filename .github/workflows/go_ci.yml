@@ -19,24 +19,17 @@ jobs:
       with:
         go-version: '1.25'
 
-    # --- Root Folder Execution ---
-    - name: Root - Go Vet
-      run: go vet .
-
-    - name: Root and subfolders - Go Fmt Check
+    # Use the same transparent sequence as build.sh.
+    - name: All packages - Go Fmt Check
       run: |
-        # If gofmt outputs anything, grep will find it and exit with 0, 
-        # so we invert it with '!' to make the workflow fail.
+        # If gofmt prints a filename, that file needs formatting.
         ! gofmt -l . | grep -q .
 
-    - name: Root - Go Build
-      run: go build .
+    - name: All packages - Unit Tests
+      run: go test ./...
 
-    # --- Subfolder Execution ---
-    - name: Telegram Channel - Go Vet
-      run: go vet .
-      working-directory: ./channels/telegram
+    - name: All packages - Go Vet
+      run: go vet ./...
 
-    - name: Telegram Channel - Go Build
-      run: go build .
-      working-directory: ./channels/telegram
+    - name: All packages - Go Build
+      run: go build ./...
