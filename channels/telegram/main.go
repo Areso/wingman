@@ -348,13 +348,18 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 	return nil
 }
 
-// sendPluginOptions sejds the fixd option list from plugin.json
+// sendPluginOptions sends the fixed option list from plugin.json.
 func (b *Bot) sendPluginOptions(chatID int64, plugin *Plugin) {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i, option := range plugin.Options {
 		callbackData := fmt.Sprintf("option:%s:%d", plugin.ID, i)
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{
 			tgbotapi.NewInlineKeyboardButtonData(option, callbackData),
+		})
+	}
+	if plugin.UserInput {
+		rows = append(rows, []tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData("Custom input", "input:"+plugin.ID),
 		})
 	}
 
@@ -630,6 +635,22 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 	if strings.HasPrefix(callback.Data, "option:") {
 		b.handleOptionCallback(callback)
+		return
+	}
+	if strings.HasPrefix(callback.Data, "input:") {
+		pluginID := strings.TrimPrefix(callback.Data, "input:")
+		plugin, exists := b.plugins[pluginID]
+		if !exists || !plugin.UserInput {
+			msg := tgbotapi.NewMessage(callback.Message.Chat.ID, "Plugin not found")
+			b.api.Send(msg)
+			return
+		}
+		if !b.authorizePlugin(callback.Message.Chat.ID, plugin) {
+			return
+		}
+		b.pendingInput[callback.Message.Chat.ID] = pluginID
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Please enter parameters for %s:", plugin.Name))
+		b.api.Send(msg)
 		return
 	}
 	// Extract plugin ID from callback data (this should be the plugin ID)

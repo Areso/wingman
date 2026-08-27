@@ -1,0 +1,26 @@
+{
+    "id": "manage_digitalocean_vms",
+    "name": "Manage DigitalOcean VMs",
+    "enabled": true,
+    "invocation_with": "python3",
+    "invocation_file": "digitalocean_vms.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 45,
+    "options": [
+        "create FRA 512MB",
+        "create FRA 1GB",
+        "create FRA 2GB",
+        "create AMS 512MB",
+        "create AMS 1GB",
+        "create AMS 2GB",
+        "create NYC 512MB",
+        "create NYC 1GB",
+        "create NYC 2GB",
+        "list",
+        "list wingman"
+    ],
+    "adhoc": true,
+    "cron": false,
+    "min_allowed_role": "owner",
+    "user_input": true
+}

@@ -1,0 +1,6 @@
+[digitalocean_plugin]
+base_url = "https://api.digitalocean.com/v2"
+secret_path = "~/.wingman/plugins/digitalocean"
+timeout_seconds = 20
+# DigitalOcean SSH key display names to install on new VMs.
+ssh_keys = ["areso-dell11"]
