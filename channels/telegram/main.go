@@ -36,6 +36,9 @@ type Plugin struct {
 	Dir                string
 	MinAllowedRole     string `json:"min_allowed_role"`
 	UserInput          bool   `json:"user_input"`
+	UserInputLabel     string `json:"user_input_label"`
+	UserInputPrompt    string `json:"user_input_prompt"`
+	UserInputPrefix    string `json:"user_input_prefix"`
 }
 
 // PluginInvocationRequest represents the request to invoke a plugin
@@ -77,7 +80,12 @@ type Bot struct {
 	host         string
 	db           *sql.DB
 	rest_secret  *string
-	pendingInput map[int64]string // chatID -> pluginID waiting for user input
+	pendingInput map[int64]PendingInput
+}
+
+type PendingInput struct {
+	PluginID string
+	Prefix   string
 }
 
 type CoreConfig struct {
@@ -99,7 +107,7 @@ func newBot(token string, port int, host string) (*Bot, error) {
 		plugins:      make(map[string]*Plugin),
 		port:         port,
 		host:         host,
-		pendingInput: make(map[int64]string),
+		pendingInput: make(map[int64]PendingInput),
 	}, nil
 }
 
@@ -358,8 +366,12 @@ func (b *Bot) sendPluginOptions(chatID int64, plugin *Plugin) {
 		})
 	}
 	if plugin.UserInput {
+		label := plugin.UserInputLabel
+		if label == "" {
+			label = "Custom input"
+		}
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData("Custom input", "input:"+plugin.ID),
+			tgbotapi.NewInlineKeyboardButtonData(label, "input:"+plugin.ID),
 		})
 	}
 
@@ -534,8 +546,8 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	}
 
 	// Handle text input for plugins waiting for user input
-	if pluginID, waiting := b.pendingInput[message.Chat.ID]; waiting {
-		plugin, exists := b.plugins[pluginID]
+	if pending, waiting := b.pendingInput[message.Chat.ID]; waiting {
+		plugin, exists := b.plugins[pending.PluginID]
 		if !exists {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Plugin not found")
 			b.api.Send(msg)
@@ -545,9 +557,6 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 			return
 		}
 
-		// Clear the pending input
-		delete(b.pendingInput, message.Chat.ID)
-
 		userInput := strings.TrimSpace(message.Text)
 		if userInput == "" {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Empty input, please try again")
@@ -555,10 +564,12 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 			return
 		}
 
+		delete(b.pendingInput, message.Chat.ID)
+
 		req := PluginInvocationRequest{
-			ID: pluginID,
+			ID: pending.PluginID,
 			Params: map[string]string{
-				"option": userInput,
+				"option": pending.Prefix + userInput,
 			},
 		}
 
@@ -566,8 +577,8 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 		b.api.Send(msg)
 
 		chatIDStr := strconv.FormatInt(message.Chat.ID, 10)
-		if err := b.invokePlugin(pluginID, req, "telegram", chatIDStr); err != nil {
-			log.Printf("Error invoking plugin %s: %v", pluginID, err)
+		if err := b.invokePlugin(pending.PluginID, req, "telegram", chatIDStr); err != nil {
+			log.Printf("Error invoking plugin %s: %v", pending.PluginID, err)
 			msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error invoking plugin: %v", err))
 			b.api.Send(msg)
 			return
@@ -648,8 +659,15 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 		if !b.authorizePlugin(callback.Message.Chat.ID, plugin) {
 			return
 		}
-		b.pendingInput[callback.Message.Chat.ID] = pluginID
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Please enter parameters for %s:", plugin.Name))
+		b.pendingInput[callback.Message.Chat.ID] = PendingInput{
+			PluginID: pluginID,
+			Prefix:   plugin.UserInputPrefix,
+		}
+		prompt := plugin.UserInputPrompt
+		if prompt == "" {
+			prompt = fmt.Sprintf("Please enter parameters for %s:", plugin.Name)
+		}
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, prompt)
 		b.api.Send(msg)
 		return
 	}
@@ -673,8 +691,15 @@ func (b *Bot) handleCallback(callback *tgbotapi.CallbackQuery) {
 
 	// Check if plugin requires text input from user
 	if plugin.UserInput {
-		b.pendingInput[callback.Message.Chat.ID] = pluginID
-		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Please enter the topic for %s:", plugin.Name))
+		b.pendingInput[callback.Message.Chat.ID] = PendingInput{
+			PluginID: pluginID,
+			Prefix:   plugin.UserInputPrefix,
+		}
+		prompt := plugin.UserInputPrompt
+		if prompt == "" {
+			prompt = fmt.Sprintf("Please enter the topic for %s:", plugin.Name)
+		}
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, prompt)
 		b.api.Send(msg)
 		return
 	}

@@ -43,7 +43,7 @@ python3 digitalocean_vms.py delete wing-a1b2
 ```
 
 The Telegram channel presents the create and list commands as buttons. Choose
-`Custom input` and enter `delete wing-a1b2` to delete a VM by its exact name.
+`Delete VM`, then enter only the exact VM name, such as `wing-a1b2`.
 Droplet creation is asynchronous: a successful create response means
 DigitalOcean accepted provisioning, not that the VM is active yet. Use `list`
 to check its status and public IP. All successful output is JSON on standard

@@ -22,5 +22,8 @@
     "adhoc": true,
     "cron": false,
     "min_allowed_role": "owner",
-    "user_input": true
+    "user_input": true,
+    "user_input_label": "Delete VM",
+    "user_input_prompt": "Enter the exact VM name to delete (for example, wing-a1b2):",
+    "user_input_prefix": "delete "
 }

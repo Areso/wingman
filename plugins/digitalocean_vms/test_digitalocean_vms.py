@@ -167,6 +167,8 @@ class DigitalOceanClientTests(unittest.TestCase):
         self.assertEqual(plugin["min_allowed_role"], "owner")
         self.assertTrue(plugin["adhoc"])
         self.assertTrue(plugin["user_input"])
+        self.assertEqual(plugin["user_input_label"], "Delete VM")
+        self.assertEqual(plugin["user_input_prefix"], "delete ")
         self.assertIn("create FRA 512MB", plugin["options"])
         self.assertIn("create AMS 1GB", plugin["options"])
         self.assertIn("create NYC 2GB", plugin["options"])

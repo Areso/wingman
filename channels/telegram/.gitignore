@@ -1,2 +1,4 @@
 telegram
 telegram.db
+telegram.db-shm
+telegram.db-wal
