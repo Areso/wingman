@@ -1,0 +1,8 @@
+[codeweavers_plugin]
+url = "https://www.codeweavers.com/store"
+promotions_url = "https://www.codeweavers.com/store/promotions"
+timeout_seconds = 15
+
+[normal_prices]
+CrossOver + = 74
+CrossOver Life = 474

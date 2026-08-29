@@ -1,0 +1,14 @@
+{
+    "id": "check_codeweavers_discounts",
+    "name": "Check CodeWeavers plans for discounts",
+    "enabled": true,
+    "invocation_with": "python3",
+    "invocation_file": "main.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 30,
+    "options": [],
+    "adhoc": true,
+    "cron": true,
+    "cron_time": "0 8 * * *",
+    "min_allowed_role": "guest"
+}
