@@ -76,7 +76,7 @@ type Plugin struct {
 	CronTime           string   `json:"cron_time"`
 	MinAllowedRole     string   `json:"min_allowed_role"`
 	UserInput          bool     `json:"user_input"`
-	Params             string   `json:"params"`
+	Params             []string `json:"params"`
 	Options            []string `json:"options"`
 }
 
@@ -413,14 +413,14 @@ func rotateData(db *sql.DB) error {
 	return nil
 }
 
-func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params map[string]string) (int64, error) {
+func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params any) (int64, error) {
 	now := time.Now().UTC().Unix()
 	if params == nil {
 		params = make(map[string]string)
 	}
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
-		return 0, fmt.Errorf("error marshaling parmas for %s: %w", p.ID, err)
+		return 0, fmt.Errorf("error marshaling params for %s: %w", p.ID, err)
 	}
 	res, err := db.Exec(
 		"INSERT INTO tasks_queued (created_at, plugin_id, invoked_with, invoked_by_id, params) VALUES (?, ?, ?, ?, ?)",
@@ -445,6 +445,27 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
+func parseTaskArgs(paramsRaw sql.NullString) ([]string, error) {
+	if !paramsRaw.Valid || paramsRaw.String == "" {
+		return nil, nil
+	}
+
+	var args []string
+	if err := json.Unmarshal([]byte(paramsRaw.String), &args); err == nil {
+		return args, nil
+	}
+
+	// Manual invocations and already queued tasks use the original option map.
+	var params map[string]string
+	if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
+		return nil, err
+	}
+	if option := params["option"]; option != "" {
+		return []string{option}, nil
+	}
+	return nil, nil
+}
+
 // Helper to isolate execution logic and guarantee we return valid DB values
 func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql.NullString, id int64) (string, int, error) {
 	// Check if plugin exists
@@ -454,19 +475,16 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		return err.Error(), -3, err // Using -3 for configuration errors
 	}
 
-	// Parse params
-	params := make(map[string]string)
-	if paramsRaw.Valid && paramsRaw.String != "" {
-		if err := json.Unmarshal([]byte(paramsRaw.String), &params); err != nil {
-			errWrap := fmt.Errorf("error unmarshalling params: %w", err)
-			return errWrap.Error(), -4, errWrap // Using -4 for malformed input data
-		}
+	args, err := parseTaskArgs(paramsRaw)
+	if err != nil {
+		errWrap := fmt.Errorf("error unmarshalling params: %w", err)
+		return errWrap.Error(), -4, errWrap // Using -4 for malformed input data
 	}
 
 	// Build command string
 	fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
-	if option := params["option"]; option != "" {
-		fullCommand = fmt.Sprintf("%s %s", fullCommand, shellQuote(option))
+	for _, arg := range args {
+		fullCommand += " " + shellQuote(arg)
 	}
 
 	if p.InvocationType == string(Sync) {
@@ -719,11 +737,7 @@ func scheduleTasks(ctx context.Context, db *sql.DB, plugins map[string]Plugin) {
 						log.Printf("error while checking piled up tasks %v", err1)
 						continue
 					}
-					cronParams := make(map[string]string)
-					if strings.TrimSpace(p.Params) != "" {
-						cronParams["option"] = strings.TrimSpace(p.Params)
-					}
-					if _, err := create_task(db, p, "cron", "n/a", cronParams); err != nil {
+					if _, err := create_task(db, p, "cron", "n/a", p.Params); err != nil {
 						log.Printf("error creating cron task for %s: %v", p.ID, err)
 					}
 				}

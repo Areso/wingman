@@ -314,12 +314,23 @@ func TestExecutePluginTask(t *testing.T) {
 		t.Fatalf("executePluginTask() = %q, %d, %v", result, rc, err)
 	}
 
-	_, rc, err = executePluginTask(plugins, "missing", sql.NullString{}, 2)
+	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf '%s|%s|%s' \"$1\" \"$2\" \"$3\""), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `["two words","-o","output; touch unsafe"]`}, 2)
+	if err != nil || rc != 0 || !strings.Contains(result, "two words|-o|output; touch unsafe") {
+		t.Fatalf("executePluginTask() with argument list = %q, %d, %v", result, rc, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unsafe")); !os.IsNotExist(err) {
+		t.Fatal("shell metacharacters in arguments must not be executed")
+	}
+
+	_, rc, err = executePluginTask(plugins, "missing", sql.NullString{}, 3)
 	if err == nil || rc != -3 {
 		t.Fatalf("missing plugin rc/error = %d, %v; want -3 and an error", rc, err)
 	}
 
-	_, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 3)
+	_, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 4)
 	if err == nil || rc != -4 {
 		t.Fatalf("invalid params rc/error = %d, %v; want -4 and an error", rc, err)
 	}

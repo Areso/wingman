@@ -1,7 +1,8 @@
-# Ignore private plugin
-plugins/bazaraki/
+# binary
 wingman
+# database
 wingman.db
 wingman.db-shm
 wingman.db-wal
+# IDE settings
 .DS_Store
