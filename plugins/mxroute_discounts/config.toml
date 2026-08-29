@@ -1,0 +1,8 @@
+[mxroute_plugin]
+url = "https://mxroute.com/#plans"
+timeout_seconds = 15
+
+[normal_prices]
+small = 59
+medium = 69
+large = 79
