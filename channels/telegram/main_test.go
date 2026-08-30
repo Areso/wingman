@@ -291,12 +291,13 @@ func TestHandleSendMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("truncates oversized output on a UTF-8 boundary", func(t *testing.T) {
-		longMessage := strings.Repeat("a", 3999) + "é" + strings.Repeat("b", 10)
+	t.Run("splits oversized Unicode output without losing content", func(t *testing.T) {
+		longMessage := strings.Repeat("界", 1200) + "\n" + strings.Repeat("🙂", 1100) + "\t" + strings.Repeat("é", 900)
 		body, err := json.Marshal(SendMsgRequest{ChatID: 10, Message: longMessage})
 		if err != nil {
 			t.Fatal(err)
 		}
+		requestStart := len(*requests)
 		req := httptest.NewRequest(http.MethodPost, "/send_message_to_chat_id", strings.NewReader(string(body)))
 		req.Header.Set("Authorization", "Bearer rest-token")
 		res := httptest.NewRecorder()
@@ -304,9 +305,23 @@ func TestHandleSendMessage(t *testing.T) {
 		if res.Code != http.StatusOK {
 			t.Fatalf("status/body = %d, %q", res.Code, res.Body.String())
 		}
-		text := (*requests)[len(*requests)-1].Get("text")
-		if !strings.HasSuffix(text, "...[truncated due to size, limit is 4000 bytes]") || !utf8.ValidString(text) {
-			t.Fatalf("truncated text has unexpected boundary or suffix: %q", text[len(text)-80:])
+		sent := (*requests)[requestStart:]
+		if len(sent) < 2 {
+			t.Fatalf("Telegram calls = %d; want multiple", len(sent))
+		}
+		var reconstructed strings.Builder
+		for i, form := range sent {
+			chunk := form.Get("text")
+			if len(chunk) > telegramMessageLimit {
+				t.Errorf("chunk %d length = %d bytes; want <= %d", i, len(chunk), telegramMessageLimit)
+			}
+			if !utf8.ValidString(chunk) {
+				t.Errorf("chunk %d is not valid UTF-8", i)
+			}
+			reconstructed.WriteString(chunk)
+		}
+		if reconstructed.String() != longMessage {
+			t.Fatal("concatenated Telegram chunks do not reproduce the original message")
 		}
 	})
 }

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -56,6 +58,36 @@ type SendMsgRequest struct {
 // SendMsgRequestToDefault represents the request to send a message to the default chat
 type SendMsgRequestToDefault struct {
 	Message string `json:"message"`
+}
+
+const telegramMessageLimit = 4000
+
+func splitTelegramMessage(text string) []string {
+	var chunks []string
+	for len(text) > telegramMessageLimit {
+		end := telegramMessageLimit
+		for !utf8.RuneStart(text[end]) {
+			end--
+		}
+
+		splitAt := 0
+		if newline := strings.LastIndexByte(text[:end], '\n'); newline >= 0 {
+			splitAt = newline + 1
+		} else {
+			for index, r := range text[:end] {
+				if unicode.IsSpace(r) {
+					splitAt = index + utf8.RuneLen(r)
+				}
+			}
+		}
+		if splitAt == 0 {
+			splitAt = end
+		}
+
+		chunks = append(chunks, text[:splitAt])
+		text = text[splitAt:]
+	}
+	return append(chunks, text)
 }
 
 // Config holds the bot configuration
@@ -469,28 +501,20 @@ func (b *Bot) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		text = req.Message
 	}
 
-	if len(text) > 4000 {
-		safeEnd := 0
-		for idx := range text {
-			if idx > 4000 {
-				break
-			}
-			safeEnd = idx
-		}
-		text = text[:safeEnd] + "...[truncated due to size, limit is 4000 bytes]"
-	}
 	if strings.TrimSpace(text) == "" {
 		text = "(plugin produced no output)"
 	}
 
-	msg := tgbotapi.NewMessage(chatID, text)
-	if _, err := b.api.Send(msg); err != nil {
-		log.Printf("CRITICAL: Telegram delivery failed for chat %d: %v", chatID, err)
+	for _, chunk := range splitTelegramMessage(text) {
+		msg := tgbotapi.NewMessage(chatID, chunk)
+		if _, err := b.api.Send(msg); err != nil {
+			log.Printf("CRITICAL: Telegram delivery failed for chat %d: %v", chatID, err)
 
-		// Explicitly bubble up the 502/500 so upstream cron knows the task failed execution
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error(), "status": "dropped"})
-		return
+			// Explicitly bubble up the 502/500 so upstream cron knows the task failed execution
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error(), "status": "dropped"})
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
