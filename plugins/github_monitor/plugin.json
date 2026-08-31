@@ -1,0 +1,14 @@
+{
+    "id": "monitor_github",
+    "name": "Monitor GitHub profile and repositories",
+    "enabled": true,
+    "invocation_with": "python3",
+    "invocation_file": "main.py",
+    "invocation_type": "sync",
+    "invocation_timeout_s": 1200,
+    "options": [],
+    "adhoc": true,
+    "cron": true,
+    "cron_time": "0 8 * * *",
+    "min_allowed_role": "owner"
+}
