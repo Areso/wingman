@@ -25,5 +25,6 @@
     "user_input": true,
     "user_input_label": "Delete VM",
     "user_input_prompt": "Enter the exact VM name to delete (for example, wing-a1b2):",
-    "user_input_prefix": "delete "
+    "user_input_prefix": "delete ",
+    "plugin_contract_ver": 1
 }

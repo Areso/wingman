@@ -27,6 +27,7 @@ func validPlugin() Plugin {
 		InvocationType:     "sync",
 		MinAllowedRole:     "guest",
 		InvocationTimeoutS: 1,
+		PluginContractVer:  1,
 	}
 }
 
@@ -74,6 +75,28 @@ func TestPluginValidate(t *testing.T) {
 				tt.change(&plugin)
 			}
 			assertErrorContains(t, plugin.Validate(), tt.wantErr)
+		})
+	}
+}
+
+func TestPluginValidateContractVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version int
+		minimum int
+		wantErr string
+	}{
+		{name: "minimum version", version: 1, minimum: 1},
+		{name: "newer version", version: 2, minimum: 1},
+		{name: "missing version", version: 0, minimum: 1, wantErr: "must be at least 1"},
+		{name: "below configured minimum", version: 1, minimum: 2, wantErr: "must be at least 2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := validPlugin()
+			plugin.PluginContractVer = tt.version
+			assertErrorContains(t, plugin.ValidateContractVersion(tt.minimum), tt.wantErr)
 		})
 	}
 }
@@ -200,7 +223,7 @@ func TestLoadConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plugins, err := loadConfigs[Plugin](dir, "plugin*.json")
+	plugins, err := loadConfigs[Plugin](dir, "plugin*.json", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,6 +416,7 @@ func TestValidateAppConfig(t *testing.T) {
 		"retries_threshold = 3",
 		"tasks_retention = false",
 		"concurrent_tasks_limit = 2",
+		"minimum_plugin_contract_version = 1",
 	}, "\n") + "\n"
 	tests := []struct {
 		name    string
@@ -405,6 +429,8 @@ func TestValidateAppConfig(t *testing.T) {
 		{name: "invalid verbosity", input: strings.Replace(valid, "verbose_level = 2", "verbose_level = 4", 1), wantErr: "between 1 and 3"},
 		{name: "invalid retries", input: strings.Replace(valid, "retries_threshold = 3", "retries_threshold = 0", 1), wantErr: "between 1 and 20"},
 		{name: "invalid concurrency", input: strings.Replace(valid, "concurrent_tasks_limit = 2", "concurrent_tasks_limit = 21", 1), wantErr: "between 1 and 20"},
+		{name: "missing minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 1\n", "", 1), wantErr: "minimum_plugin_contract_version' is missing"},
+		{name: "invalid minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 1", "minimum_plugin_contract_version = 0", 1), wantErr: "must be at least 1"},
 		{name: "protected API needs filename", input: strings.Replace(valid, "is_core_rest_protected = false", "is_core_rest_protected = true", 1), wantErr: "secret_filename' is missing"},
 		{name: "retention needs days", input: strings.Replace(valid, "tasks_retention = false", "tasks_retention = true", 1), wantErr: "retention_days' is missing"},
 	}

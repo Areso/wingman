@@ -78,6 +78,7 @@ type Plugin struct {
 	UserInput          bool     `json:"user_input"`
 	Params             []string `json:"params"`
 	Options            []string `json:"options"`
+	PluginContractVer  int      `json:"plugin_contract_ver"`
 }
 
 func (p *Plugin) Validate() error {
@@ -120,6 +121,13 @@ func (p *Plugin) Validate() error {
 		// Valid role, do nothing
 	default:
 		return fmt.Errorf("field 'min_allowed_role' value should be guest or user or owner, current value is %s", p.MinAllowedRole)
+	}
+	return nil
+}
+
+func (p *Plugin) ValidateContractVersion(minimum int) error {
+	if p.PluginContractVer < minimum {
+		return fmt.Errorf("field 'plugin_contract_ver' must be at least %d, got %d", minimum, p.PluginContractVer)
 	}
 	return nil
 }
@@ -223,7 +231,7 @@ func (c *Channel) Validate() error {
 func loadConfigs[T any, PT interface {
 	*T
 	Config
-}](dir, pattern string) ([]T, error) {
+}](dir, pattern string, minimumPluginContractVersion int) ([]T, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -265,6 +273,12 @@ func loadConfigs[T any, PT interface {
 			}
 			seenIDs[id] = true
 			common.Dir = filepath.Join(dir, entry.Name())
+			if validator, ok := any(PT(&item)).(interface{ ValidateContractVersion(int) error }); ok {
+				if err := validator.ValidateContractVersion(minimumPluginContractVersion); err != nil {
+					log.Fatalf("invalid config %s: %v", entry.Name(), err)
+					continue
+				}
+			}
 			// Execute validation before appending to the results array
 			if err := PT(&item).Validate(); err != nil {
 				// log.Printf("skipping invalid config %s: %v", entry.Name(), err)
@@ -907,15 +921,16 @@ func sendResult(channel *Channel, recipient *int64, result string, taskID int64)
 }
 
 type AppConfig struct {
-	Host                   string `toml:"core_host"`
-	Port                   int    `toml:"core_port"`
-	Verbose_Level          int    `toml:"verbose_level"`
-	IsRESTProtected        bool   `toml:"is_core_rest_protected"`
-	CoreRESTSecretFilename string `toml:"core_rest_secret_filename"`
-	RetriesThreshold       int    `toml:"retries_threshold"`
-	TasksRetention         bool   `toml:"tasks_retention"`
-	TasksRetentionDays     int    `toml:"tasks_retention_days"`
-	ConcurrentTasksLimit   int    `toml:"concurrent_tasks_limit"`
+	Host                         string `toml:"core_host"`
+	Port                         int    `toml:"core_port"`
+	Verbose_Level                int    `toml:"verbose_level"`
+	IsRESTProtected              bool   `toml:"is_core_rest_protected"`
+	CoreRESTSecretFilename       string `toml:"core_rest_secret_filename"`
+	RetriesThreshold             int    `toml:"retries_threshold"`
+	TasksRetention               bool   `toml:"tasks_retention"`
+	TasksRetentionDays           int    `toml:"tasks_retention_days"`
+	ConcurrentTasksLimit         int    `toml:"concurrent_tasks_limit"`
+	MinimumPluginContractVersion int    `toml:"minimum_plugin_contract_version"`
 }
 
 var config AppConfig
@@ -1051,6 +1066,12 @@ func validateAppconfig(meta toml.MetaData) error {
 	if config.ConcurrentTasksLimit < 1 || config.ConcurrentTasksLimit > 20 {
 		return fmt.Errorf("field 'concurrent_tasks_limit' must be between 1 and 20 (got %d)", config.ConcurrentTasksLimit)
 	}
+	if !meta.IsDefined("minimum_plugin_contract_version") {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' is missing from config.toml")
+	}
+	if config.MinimumPluginContractVersion < 1 {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 1 (got %d)", config.MinimumPluginContractVersion)
+	}
 	return nil
 }
 
@@ -1075,7 +1096,7 @@ func main() {
 	}
 	defer db.Close()
 
-	plugins, err := loadConfigs[Plugin]("plugins", "plugin*.json")
+	plugins, err := loadConfigs[Plugin]("plugins", "plugin*.json", config.MinimumPluginContractVersion)
 	if err != nil {
 		log.Fatalf("failed to load plugins: %v", err)
 	}
@@ -1089,7 +1110,7 @@ func main() {
 		}
 	}
 
-	channels, err := loadConfigs[Channel]("channels", "channel.json")
+	channels, err := loadConfigs[Channel]("channels", "channel.json", config.MinimumPluginContractVersion)
 	if err != nil {
 		log.Fatalf("failed to load channels: %v", err)
 	}

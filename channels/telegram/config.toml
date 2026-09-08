@@ -1,2 +1,3 @@
 comm_telegram_host = "127.0.0.1"
 comm_telegram_port = 8085
+minimum_plugin_contract_version = 1

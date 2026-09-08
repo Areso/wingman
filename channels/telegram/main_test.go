@@ -28,6 +28,7 @@ func validTelegramPlugin() Plugin {
 		InvocationTimeoutS: 1,
 		Adhoc:              true,
 		MinAllowedRole:     "guest",
+		PluginContractVer:  1,
 	}
 }
 
@@ -81,6 +82,28 @@ func TestPluginValidate(t *testing.T) {
 				tt.change(&plugin)
 			}
 			assertTelegramErrorContains(t, plugin.Validate(), tt.wantErr)
+		})
+	}
+}
+
+func TestPluginValidateContractVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version int
+		minimum int
+		wantErr string
+	}{
+		{name: "minimum version", version: 1, minimum: 1},
+		{name: "newer version", version: 2, minimum: 1},
+		{name: "missing version", version: 0, minimum: 1, wantErr: "must be at least 1"},
+		{name: "below configured minimum", version: 1, minimum: 2, wantErr: "must be at least 2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := validTelegramPlugin()
+			plugin.PluginContractVer = tt.version
+			assertTelegramErrorContains(t, plugin.ValidateContractVersion(tt.minimum), tt.wantErr)
 		})
 	}
 }
@@ -140,7 +163,7 @@ func TestLoadPlugins(t *testing.T) {
 	writeTelegramPluginJSON(t, root, "duplicate", validTelegramPlugin())
 
 	bot := &Bot{plugins: make(map[string]*Plugin)}
-	if err := bot.loadPlugins(root); err != nil {
+	if err := bot.loadPlugins(root, 1); err != nil {
 		t.Fatal(err)
 	}
 	if len(bot.plugins) != 1 || bot.plugins["weather"] == nil {
@@ -157,11 +180,13 @@ func TestValidateAppConfig(t *testing.T) {
 		toml    string
 		wantErr string
 	}{
-		{name: "valid", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\n"},
+		{name: "valid", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 1\n"},
 		{name: "missing host", toml: "comm_telegram_port = 8090\n", wantErr: "host' is missing"},
 		{name: "empty host", toml: "comm_telegram_host = '  '\ncomm_telegram_port = 8090\n", wantErr: "host' cannot be empty"},
 		{name: "missing port", toml: "comm_telegram_host = '127.0.0.1'\n", wantErr: "port' is missing"},
-		{name: "port too low", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 80\n", wantErr: "between 1024 and 9900"},
+		{name: "port too low", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 80\nminimum_plugin_contract_version = 1\n", wantErr: "between 1024 and 9900"},
+		{name: "missing minimum plugin contract version", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\n", wantErr: "minimum_plugin_contract_version' is missing"},
+		{name: "invalid minimum plugin contract version", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 0\n", wantErr: "must be at least 1"},
 	}
 
 	for _, tt := range tests {

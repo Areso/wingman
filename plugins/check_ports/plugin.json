@@ -10,5 +10,6 @@
     "adhoc":true,
     "cron":true,
     "cron_time":"* * * * *",
-    "min_allowed_role": "guest"
+    "min_allowed_role": "guest",
+    "plugin_contract_ver": 1
 }

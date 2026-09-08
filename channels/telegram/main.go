@@ -41,6 +41,7 @@ type Plugin struct {
 	UserInputLabel     string `json:"user_input_label"`
 	UserInputPrompt    string `json:"user_input_prompt"`
 	UserInputPrefix    string `json:"user_input_prefix"`
+	PluginContractVer  int    `json:"plugin_contract_ver"`
 }
 
 // PluginInvocationRequest represents the request to invoke a plugin
@@ -300,6 +301,13 @@ func (p *Plugin) Validate() error {
 	return nil
 }
 
+func (p *Plugin) ValidateContractVersion(minimum int) error {
+	if p.PluginContractVer < minimum {
+		return fmt.Errorf("field 'plugin_contract_ver' must be at least %d, got %d", minimum, p.PluginContractVer)
+	}
+	return nil
+}
+
 type Channel struct {
 	SecretLocation string `json:"secret_location"`
 }
@@ -327,7 +335,7 @@ func getSecretLocation(filename string) (string, error) {
 }
 
 // loadPlugins reads and filters plugins from plugins directory
-func (b *Bot) loadPlugins(pluginsDir string) error {
+func (b *Bot) loadPlugins(pluginsDir string, minimumPluginContractVersion int) error {
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
 		return fmt.Errorf("failed to read plugins directory: %w", err)
@@ -372,6 +380,10 @@ func (b *Bot) loadPlugins(pluginsDir string) error {
 
 			p.Dir = filepath.Join(pluginsDir, entry.Name())
 
+			if err := p.ValidateContractVersion(minimumPluginContractVersion); err != nil {
+				log.Fatalf("invalid config %s: %v", entry.Name(), err)
+				continue
+			}
 			if err := p.Validate(); err != nil {
 				// log.Printf("skipping invalid plugin %s: %v", entry.Name(), err)
 				log.Fatalf("invalid config %s: %v", entry.Name(), err)
@@ -871,13 +883,20 @@ func validateAppconfig(config ChannelConfig, meta toml.MetaData) error {
 	if config.Port < 1024 || config.Port > 9900 {
 		return fmt.Errorf("field 'comm_telegram_port' must be between 1024 and 9900 (got %d)", config.Port)
 	}
+	if !meta.IsDefined("minimum_plugin_contract_version") {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' is missing from config.toml")
+	}
+	if config.MinimumPluginContractVersion < 1 {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 1 (got %d)", config.MinimumPluginContractVersion)
+	}
 
 	return nil
 }
 
 type ChannelConfig struct {
-	Host string `toml:"comm_telegram_host"`
-	Port int    `toml:"comm_telegram_port"`
+	Host                         string `toml:"comm_telegram_host"`
+	Port                         int    `toml:"comm_telegram_port"`
+	MinimumPluginContractVersion int    `toml:"minimum_plugin_contract_version"`
 }
 
 func main() {
@@ -943,7 +962,7 @@ func main() {
 
 	// Load plugins
 	log.Println("Loading plugins...")
-	if err := bot.loadPlugins("../../plugins"); err != nil {
+	if err := bot.loadPlugins("../../plugins", config.MinimumPluginContractVersion); err != nil {
 		log.Fatalf("Failed to load plugins: %v", err)
 	}
 

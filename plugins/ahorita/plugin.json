@@ -16,5 +16,6 @@
     "adhoc": true,
     "cron": false,
     "min_allowed_role": "owner",
-    "user_input": true
+    "user_input": true,
+    "plugin_contract_ver": 1
 }
