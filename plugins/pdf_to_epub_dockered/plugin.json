@@ -1,0 +1,15 @@
+{
+  "id": "pdf_to_epub_dockered",
+  "name": "Convert digital or scanned PDF to EPUB (d)",
+  "enabled": true,
+  "invocation_with": "bash",
+  "invocation_file": "run.sh",
+  "invocation_type": "sync",
+  "invocation_timeout_s": 3600,
+  "options": [],
+  "adhoc": true,
+  "cron": false,
+  "cron_time": "",
+  "min_allowed_role": "owner",
+  "user_input": true
+}
