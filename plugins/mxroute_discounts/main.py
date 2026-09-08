@@ -32,7 +32,9 @@ class PlanParser(HTMLParser):
         classes = set(attributes.get("class", "").split())
 
         if self.plan is None:
-            if tag == "div" and "plan" in classes:
+            if (tag == "article" and "plan-card" in classes) or (
+                tag == "div" and "plan" in classes
+            ):
                 self.plan = {"name": "", "price": "", "url": ""}
                 self.plan_depth = 1
             return
@@ -40,16 +42,16 @@ class PlanParser(HTMLParser):
         self.plan_depth += 1
         if self.capture is not None:
             self.capture_depth += 1
-        elif tag == "div" and "name" in classes:
+        elif tag == "h3" or (tag == "div" and "name" in classes):
             self.capture = "name"
             self.capture_depth = 1
             self.capture_parts = []
-        elif tag == "div" and "price" in classes:
+        elif "price" in classes:
             self.capture = "price"
             self.capture_depth = 1
             self.capture_parts = []
 
-        if tag == "a" and "cta" in classes:
+        if tag == "a" and ({"cta", "primary-action"} & classes):
             self.plan["url"] = attributes.get("href", "")
 
     def handle_endtag(self, _tag):

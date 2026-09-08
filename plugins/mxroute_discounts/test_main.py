@@ -11,21 +11,26 @@ import main as mxroute
 
 
 PAGE = """
-<section id="plans">
-  <div class="plan">
-    <div class="name">SMALL</div>
-    <div class="price"><b>$59</b>/year</div>
-    <a class="cta" href="https://example.test/small">Order</a>
-  </div>
-  <div class="plan popular">
-    <div class="name">MEDIUM</div>
-    <div class="price"><s>$69</s> <b>$49</b>/year</div>
-    <a class="cta" href="https://example.test/medium">Order</a>
-  </div>
-  <div class="plan">
-    <div class="name">LARGE</div>
-    <div class="price"><b>$79</b>/year</div>
-    <a class="cta" href="https://example.test/large">Order</a>
+<section class="content-section standard-pricing" id="plans">
+  <div class="plan-cards">
+    <article class="plan-card">
+      <h3>Small</h3>
+      <p class="storage">10 <span>GB storage</span></p>
+      <p class="price">$59<span> / year</span></p>
+      <a class="primary-action" href="https://example.test/small">Choose Small</a>
+    </article>
+    <article class="plan-card">
+      <h3>Medium</h3>
+      <p class="storage">25 <span>GB storage</span></p>
+      <p class="price"><s>$69</s> $49<span> / year</span></p>
+      <a class="primary-action" href="https://example.test/medium">Choose Medium</a>
+    </article>
+    <article class="plan-card">
+      <h3>Large</h3>
+      <p class="storage">50 <span>GB storage</span></p>
+      <p class="price">$79<span> / year</span></p>
+      <a class="primary-action" href="https://example.test/large">Choose Large</a>
+    </article>
   </div>
 </section>
 """
@@ -46,7 +51,7 @@ class PlanTests(unittest.TestCase):
             {"small": Decimal("59"), "medium": Decimal("69"), "large": Decimal("79")},
         )
 
-        self.assertEqual([plan["name"] for plan, _normal in discounts], ["MEDIUM"])
+        self.assertEqual([plan["name"] for plan, _normal in discounts], ["Medium"])
 
     def test_missing_configured_plan_is_an_error(self):
         with self.assertRaisesRegex(mxroute.DiscountCheckError, "not found"):
@@ -96,7 +101,7 @@ class CommandTests(unittest.TestCase):
         return code, stdout.getvalue(), stderr.getvalue()
 
     def test_no_discounts_is_silent(self):
-        normal_page = PAGE.replace("<s>$69</s> <b>$49</b>", "<b>$69</b>")
+        normal_page = PAGE.replace("<s>$69</s> $49", "$69")
         code, stdout, stderr = self.run_main(normal_page)
 
         self.assertEqual(code, 0)
@@ -107,14 +112,16 @@ class CommandTests(unittest.TestCase):
         code, stdout, stderr = self.run_main(PAGE)
 
         self.assertEqual(code, 0)
-        self.assertIn("MEDIUM is $49/year (normal $69/year)", stdout)
+        self.assertIn("Medium is $49/year (normal $69/year)", stdout)
         self.assertIn("https://example.test/medium", stdout)
         self.assertEqual(stderr, "")
 
     def test_promotion_keyword_prints_alert_at_normal_prices(self):
-        normal_page = PAGE.replace("<s>$69</s> <b>$49</b>", "<b>$69</b>")
+        normal_page = PAGE.replace("<s>$69</s> $49", "$69")
         page_with_offer = normal_page.replace(
-            "<section id=\"plans\">", '<p>Summer special offer</p><section id="plans">'
+            '<section class="content-section standard-pricing" id="plans">',
+            '<p>Summer special offer</p>'
+            '<section class="content-section standard-pricing" id="plans">',
         )
         code, stdout, stderr = self.run_main(page_with_offer)
 

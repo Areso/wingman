@@ -1084,6 +1084,9 @@ func main() {
 	pluginsMap := make(map[string]Plugin)
 	for _, p := range plugins {
 		pluginsMap[p.ID] = p
+		if p.Adhoc {
+			log.Printf("registered ad_hoc plugin: %s (%s)", p.Name, p.ID)
+		}
 	}
 
 	channels, err := loadConfigs[Channel]("channels", "channel.json")
