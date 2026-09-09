@@ -22,12 +22,11 @@ func validPlugin() Plugin {
 	return Plugin{
 		CommonConfig:       CommonConfig{ID: "weather", Enabled: true},
 		Name:               "Weather",
-		InvocationWith:     "python3",
-		InvocationFile:     "weather.py",
+		EntryPoint:         EntryPoint{Executable: "python3", Args: []string{"weather.py"}},
 		InvocationType:     "sync",
 		MinAllowedRole:     "guest",
 		InvocationTimeoutS: 1,
-		PluginContractVer:  1,
+		PluginContractVer:  2,
 	}
 }
 
@@ -59,8 +58,8 @@ func TestPluginValidate(t *testing.T) {
 	}{
 		{name: "valid plugin"},
 		{name: "missing name", change: func(p *Plugin) { p.Name = " " }, wantErr: "field 'name'"},
-		{name: "missing command", change: func(p *Plugin) { p.InvocationWith = "" }, wantErr: "field 'invocation_with'"},
-		{name: "missing file", change: func(p *Plugin) { p.InvocationFile = "" }, wantErr: "field 'invocation_file'"},
+		{name: "missing executable", change: func(p *Plugin) { p.EntryPoint.Executable = "" }, wantErr: "field 'entrypoint.executable'"},
+		{name: "missing entrypoint args", change: func(p *Plugin) { p.EntryPoint.Args = nil }, wantErr: "field 'entrypoint.args'"},
 		{name: "unknown invocation type", change: func(p *Plugin) { p.InvocationType = "later" }, wantErr: "only values sync or async"},
 		{name: "negative sync timeout", change: func(p *Plugin) { p.InvocationTimeoutS = -1 }, wantErr: "must be positive"},
 		{name: "cron without schedule", change: func(p *Plugin) { p.Cron = true }, wantErr: "cron_time"},
@@ -86,9 +85,9 @@ func TestPluginValidateContractVersion(t *testing.T) {
 		minimum int
 		wantErr string
 	}{
-		{name: "minimum version", version: 1, minimum: 1},
-		{name: "newer version", version: 2, minimum: 1},
-		{name: "missing version", version: 0, minimum: 1, wantErr: "must be at least 1"},
+		{name: "minimum version", version: 2, minimum: 2},
+		{name: "newer version", version: 3, minimum: 2},
+		{name: "missing version", version: 0, minimum: 2, wantErr: "must be at least 2"},
 		{name: "below configured minimum", version: 1, minimum: 2, wantErr: "must be at least 2"},
 	}
 
@@ -223,7 +222,7 @@ func TestLoadConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plugins, err := loadConfigs[Plugin](dir, "plugin*.json", 1)
+	plugins, err := loadConfigs[Plugin](dir, "plugin*.json", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,6 +231,50 @@ func TestLoadConfigs(t *testing.T) {
 	}
 	if plugins[0].ID != "weather" || plugins[0].Dir == "" {
 		t.Fatalf("loaded plugin = %+v; want weather with its directory recorded", plugins[0])
+	}
+}
+
+func TestPluginManifestsUseContractV2Entrypoints(t *testing.T) {
+	manifestPaths, err := filepath.Glob("plugins/*/plugin*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifestPaths) == 0 {
+		t.Fatal("no plugin manifests found")
+	}
+
+	for _, manifestPath := range manifestPaths {
+		t.Run(filepath.Base(filepath.Dir(manifestPath)), func(t *testing.T) {
+			data, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := fields["invocation_with"]; exists {
+				t.Fatal("manifest still contains invocation_with")
+			}
+			if _, exists := fields["invocation_file"]; exists {
+				t.Fatal("manifest still contains invocation_file")
+			}
+
+			var plugin Plugin
+			if err := json.Unmarshal(data, &plugin); err != nil {
+				t.Fatal(err)
+			}
+			if plugin.PluginContractVer != 2 {
+				t.Fatalf("plugin_contract_ver = %d; want 2", plugin.PluginContractVer)
+			}
+			if strings.TrimSpace(plugin.EntryPoint.Executable) == "" {
+				t.Fatal("entrypoint.executable cannot be empty")
+			}
+			if plugin.EntryPoint.Args == nil {
+				t.Fatal("entrypoint.args cannot be null or missing")
+			}
+		})
 	}
 }
 
@@ -249,19 +292,6 @@ func TestCronHelpers(t *testing.T) {
 	}
 	if matchesCron("invalid", now) {
 		t.Fatal("invalid schedules must not match")
-	}
-}
-
-func TestShellQuote(t *testing.T) {
-	tests := map[string]string{
-		"":             "''",
-		"hello world":  "'hello world'",
-		"it's raining": "'it'\\''s raining'",
-	}
-	for input, want := range tests {
-		if got := shellQuote(input); got != want {
-			t.Errorf("shellQuote(%q) = %q; want %q", input, got, want)
-		}
 	}
 }
 
@@ -325,37 +355,105 @@ func TestExecutePluginTask(t *testing.T) {
 	dir := t.TempDir()
 	plugin := validPlugin()
 	plugin.Dir = dir
-	plugin.InvocationWith = "sh"
-	plugin.InvocationFile = "plugin.sh"
-	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf 'option=%s' \"$1\""), 0o700); err != nil {
+	plugin.EntryPoint = EntryPoint{Executable: "sh", Args: []string{"plugin.sh", "manifest argument"}}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf '%s|%s' \"$1\" \"$2\""), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	plugins := map[string]Plugin{plugin.ID: plugin}
 
 	result, rc, err := executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `{"option":"two words"}`}, 1)
-	if err != nil || rc != 0 || !strings.Contains(result, "option=two words") {
+	if err != nil || rc != 0 || !strings.Contains(result, "manifest argument|two words") {
 		t.Fatalf("executePluginTask() = %q, %d, %v", result, rc, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf '%s|%s|%s' \"$1\" \"$2\" \"$3\""), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf '%s|%s|%s|%s' \"$1\" \"$2\" \"$3\" \"$4\""), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	result, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `["two words","-o","output; touch unsafe"]`}, 2)
-	if err != nil || rc != 0 || !strings.Contains(result, "two words|-o|output; touch unsafe") {
+	if err != nil || rc != 0 || !strings.Contains(result, "manifest argument|two words|-o|output; touch unsafe") {
 		t.Fatalf("executePluginTask() with argument list = %q, %d, %v", result, rc, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "unsafe")); !os.IsNotExist(err) {
 		t.Fatal("shell metacharacters in arguments must not be executed")
 	}
 
-	_, rc, err = executePluginTask(plugins, "missing", sql.NullString{}, 3)
+	binDir := filepath.Join(dir, ".venv", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "plugin"), []byte("#!/bin/sh\nprintf 'relative=%s' \"$1\""), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	relative := validPlugin()
+	relative.ID = "relative"
+	relative.Dir = dir
+	relative.EntryPoint = EntryPoint{Executable: ".venv/bin/plugin", Args: []string{"works"}}
+	plugins[relative.ID] = relative
+	result, rc, err = executePluginTask(plugins, relative.ID, sql.NullString{}, 3)
+	if err != nil || rc != 0 || !strings.Contains(result, "relative=works") {
+		t.Fatalf("executePluginTask() with relative executable = %q, %d, %v", result, rc, err)
+	}
+
+	_, rc, err = executePluginTask(plugins, "missing", sql.NullString{}, 4)
 	if err == nil || rc != -3 {
 		t.Fatalf("missing plugin rc/error = %d, %v; want -3 and an error", rc, err)
 	}
 
-	_, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 4)
+	_, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 5)
 	if err == nil || rc != -4 {
 		t.Fatalf("invalid params rc/error = %d, %v; want -4 and an error", rc, err)
+	}
+}
+
+func TestExecuteAsyncPluginTask(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "result.txt")
+	if err := os.WriteFile(
+		filepath.Join(dir, "plugin.sh"),
+		[]byte("printf '%s|%s' \"$2\" \"$3\" > \"$1\""),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	plugin := validPlugin()
+	plugin.Dir = dir
+	plugin.InvocationType = "async"
+	plugin.EntryPoint = EntryPoint{
+		Executable: "sh",
+		Args:       []string{"plugin.sh", outputPath, "manifest argument"},
+	}
+	plugins := map[string]Plugin{plugin.ID: plugin}
+
+	result, rc, err := executePluginTask(
+		plugins,
+		plugin.ID,
+		sql.NullString{Valid: true, String: `["runtime; touch unsafe"]`},
+		1,
+	)
+	if err != nil || rc != 0 || result != "Task started in background" {
+		t.Fatalf("executePluginTask() = %q, %d, %v", result, rc, err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, readErr := os.ReadFile(outputPath)
+		if readErr == nil {
+			if string(data) != "manifest argument|runtime; touch unsafe" {
+				t.Fatalf("async plugin output = %q", data)
+			}
+			break
+		}
+		if !os.IsNotExist(readErr) {
+			t.Fatal(readErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for async plugin output")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unsafe")); !os.IsNotExist(err) {
+		t.Fatal("shell metacharacters in async arguments must not be executed")
 	}
 }
 
@@ -416,7 +514,7 @@ func TestValidateAppConfig(t *testing.T) {
 		"retries_threshold = 3",
 		"tasks_retention = false",
 		"concurrent_tasks_limit = 2",
-		"minimum_plugin_contract_version = 1",
+		"minimum_plugin_contract_version = 2",
 	}, "\n") + "\n"
 	tests := []struct {
 		name    string
@@ -429,8 +527,8 @@ func TestValidateAppConfig(t *testing.T) {
 		{name: "invalid verbosity", input: strings.Replace(valid, "verbose_level = 2", "verbose_level = 4", 1), wantErr: "between 1 and 3"},
 		{name: "invalid retries", input: strings.Replace(valid, "retries_threshold = 3", "retries_threshold = 0", 1), wantErr: "between 1 and 20"},
 		{name: "invalid concurrency", input: strings.Replace(valid, "concurrent_tasks_limit = 2", "concurrent_tasks_limit = 21", 1), wantErr: "between 1 and 20"},
-		{name: "missing minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 1\n", "", 1), wantErr: "minimum_plugin_contract_version' is missing"},
-		{name: "invalid minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 1", "minimum_plugin_contract_version = 0", 1), wantErr: "must be at least 1"},
+		{name: "missing minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 2\n", "", 1), wantErr: "minimum_plugin_contract_version' is missing"},
+		{name: "invalid minimum plugin contract version", input: strings.Replace(valid, "minimum_plugin_contract_version = 2", "minimum_plugin_contract_version = 1", 1), wantErr: "must be at least 2"},
 		{name: "protected API needs filename", input: strings.Replace(valid, "is_core_rest_protected = false", "is_core_rest_protected = true", 1), wantErr: "secret_filename' is missing"},
 		{name: "retention needs days", input: strings.Replace(valid, "tasks_retention = false", "tasks_retention = true", 1), wantErr: "retention_days' is missing"},
 	}

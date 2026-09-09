@@ -22,13 +22,12 @@ func validTelegramPlugin() Plugin {
 		ID:                 "weather",
 		Name:               "Weather",
 		Enabled:            true,
-		InvocationWith:     "python3",
-		InvocationFile:     "weather.py",
+		EntryPoint:         EntryPoint{Executable: "python3", Args: []string{"weather.py"}},
 		InvocationType:     "sync",
 		InvocationTimeoutS: 1,
 		Adhoc:              true,
 		MinAllowedRole:     "guest",
-		PluginContractVer:  1,
+		PluginContractVer:  2,
 	}
 }
 
@@ -69,6 +68,8 @@ func TestPluginValidate(t *testing.T) {
 		{name: "empty ID", change: func(p *Plugin) { p.ID = " " }, wantErr: "cannot be empty"},
 		{name: "long ID", change: func(p *Plugin) { p.ID = strings.Repeat("x", 97) }, wantErr: "too long"},
 		{name: "empty name", change: func(p *Plugin) { p.Name = "" }, wantErr: "field 'name'"},
+		{name: "empty executable", change: func(p *Plugin) { p.EntryPoint.Executable = "" }, wantErr: "field 'entrypoint.executable'"},
+		{name: "missing entrypoint args", change: func(p *Plugin) { p.EntryPoint.Args = nil }, wantErr: "field 'entrypoint.args'"},
 		{name: "invalid invocation type", change: func(p *Plugin) { p.InvocationType = "unknown" }, wantErr: "only values sync or async"},
 		{name: "negative timeout", change: func(p *Plugin) { p.InvocationTimeoutS = -1 }, wantErr: "must be positive"},
 		{name: "missing cron expression", change: func(p *Plugin) { p.Cron = true }, wantErr: "cron_time"},
@@ -93,9 +94,9 @@ func TestPluginValidateContractVersion(t *testing.T) {
 		minimum int
 		wantErr string
 	}{
-		{name: "minimum version", version: 1, minimum: 1},
-		{name: "newer version", version: 2, minimum: 1},
-		{name: "missing version", version: 0, minimum: 1, wantErr: "must be at least 1"},
+		{name: "minimum version", version: 2, minimum: 2},
+		{name: "newer version", version: 3, minimum: 2},
+		{name: "missing version", version: 0, minimum: 2, wantErr: "must be at least 2"},
 		{name: "below configured minimum", version: 1, minimum: 2, wantErr: "must be at least 2"},
 	}
 
@@ -163,7 +164,7 @@ func TestLoadPlugins(t *testing.T) {
 	writeTelegramPluginJSON(t, root, "duplicate", validTelegramPlugin())
 
 	bot := &Bot{plugins: make(map[string]*Plugin)}
-	if err := bot.loadPlugins(root, 1); err != nil {
+	if err := bot.loadPlugins(root, 2); err != nil {
 		t.Fatal(err)
 	}
 	if len(bot.plugins) != 1 || bot.plugins["weather"] == nil {
@@ -180,13 +181,13 @@ func TestValidateAppConfig(t *testing.T) {
 		toml    string
 		wantErr string
 	}{
-		{name: "valid", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 1\n"},
+		{name: "valid", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 2\n"},
 		{name: "missing host", toml: "comm_telegram_port = 8090\n", wantErr: "host' is missing"},
 		{name: "empty host", toml: "comm_telegram_host = '  '\ncomm_telegram_port = 8090\n", wantErr: "host' cannot be empty"},
 		{name: "missing port", toml: "comm_telegram_host = '127.0.0.1'\n", wantErr: "port' is missing"},
-		{name: "port too low", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 80\nminimum_plugin_contract_version = 1\n", wantErr: "between 1024 and 9900"},
+		{name: "port too low", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 80\nminimum_plugin_contract_version = 2\n", wantErr: "between 1024 and 9900"},
 		{name: "missing minimum plugin contract version", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\n", wantErr: "minimum_plugin_contract_version' is missing"},
-		{name: "invalid minimum plugin contract version", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 0\n", wantErr: "must be at least 1"},
+		{name: "invalid minimum plugin contract version", toml: "comm_telegram_host = '127.0.0.1'\ncomm_telegram_port = 8090\nminimum_plugin_contract_version = 1\n", wantErr: "must be at least 2"},
 	}
 
 	for _, tt := range tests {

@@ -2,8 +2,10 @@
   "id": "pdf_to_epub",
   "name": "Convert digital or scanned PDF to EPUB",
   "enabled": true,
-  "invocation_with": "python3",
-  "invocation_file": "pdf_to_epub.py",
+  "entrypoint": {
+    "executable": "python3",
+    "args": ["pdf_to_epub.py"]
+  },
   "invocation_type": "sync",
   "invocation_timeout_s": 3600,
   "options": [],
@@ -12,5 +14,5 @@
   "cron_time": "",
   "min_allowed_role": "owner",
   "user_input": true,
-  "plugin_contract_ver": 1
+  "plugin_contract_ver": 2
 }

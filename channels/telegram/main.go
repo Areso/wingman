@@ -23,18 +23,22 @@ import (
 )
 
 // Plugin represents a loaded plugin
+type EntryPoint struct {
+	Executable string   `json:"executable"`
+	Args       []string `json:"args"`
+}
+
 type Plugin struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Enabled            bool     `json:"enabled"`
-	InvocationWith     string   `json:"invocation_with"`
-	InvocationFile     string   `json:"invocation_file"`
-	InvocationType     string   `json:"invocation_type"`
-	InvocationTimeoutS int32    `json:"invocation_timeout_s"`
-	Options            []string `json:"options"`
-	Adhoc              bool     `json:"adhoc"`
-	Cron               bool     `json:"cron"`
-	CronTime           string   `json:"cron_time"`
+	ID                 string     `json:"id"`
+	Name               string     `json:"name"`
+	Enabled            bool       `json:"enabled"`
+	EntryPoint         EntryPoint `json:"entrypoint"`
+	InvocationType     string     `json:"invocation_type"`
+	InvocationTimeoutS int32      `json:"invocation_timeout_s"`
+	Options            []string   `json:"options"`
+	Adhoc              bool       `json:"adhoc"`
+	Cron               bool       `json:"cron"`
+	CronTime           string     `json:"cron_time"`
 	Dir                string
 	MinAllowedRole     string `json:"min_allowed_role"`
 	UserInput          bool   `json:"user_input"`
@@ -265,11 +269,11 @@ func (p *Plugin) Validate() error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("field 'name' cannot be empty")
 	}
-	if strings.TrimSpace(p.InvocationWith) == "" {
-		return fmt.Errorf("field 'invocation_with' cannot be empty")
+	if strings.TrimSpace(p.EntryPoint.Executable) == "" {
+		return fmt.Errorf("field 'entrypoint.executable' cannot be empty")
 	}
-	if strings.TrimSpace(p.InvocationFile) == "" {
-		return fmt.Errorf("field 'invocation_file' cannot be empty")
+	if p.EntryPoint.Args == nil {
+		return fmt.Errorf("field 'entrypoint.args' cannot be null or missing")
 	}
 	invType := strings.TrimSpace(p.InvocationType)
 	if invType == "" {
@@ -886,8 +890,8 @@ func validateAppconfig(config ChannelConfig, meta toml.MetaData) error {
 	if !meta.IsDefined("minimum_plugin_contract_version") {
 		return fmt.Errorf("field 'minimum_plugin_contract_version' is missing from config.toml")
 	}
-	if config.MinimumPluginContractVersion < 1 {
-		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 1 (got %d)", config.MinimumPluginContractVersion)
+	if config.MinimumPluginContractVersion < 2 {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 2 (got %d)", config.MinimumPluginContractVersion)
 	}
 
 	return nil

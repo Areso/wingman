@@ -2,8 +2,10 @@
     "id":"get_weather_forecast",
     "name":"Get weather forecast for next 18hrs",
     "enabled":true,
-    "invocation_with":"source .venv/bin/activate; python3",
-    "invocation_file":"weather.py",
+    "entrypoint": {
+        "executable": ".venv/bin/python",
+        "args": ["weather.py"]
+    },
     "invocation_type": "sync",
     "invocation_timeout_s": 45,
     "options":["Cyprus, Limassol","Cyprus, Paphos","Cyprus, Larnaca", "Cyprus, Nicosia"],
@@ -11,5 +13,5 @@
     "cron":true,
     "cron_time":"30 7 * * *",
     "min_allowed_role": "guest",
-    "plugin_contract_ver": 1
+    "plugin_contract_ver": 2
 }

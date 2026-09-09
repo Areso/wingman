@@ -157,7 +157,9 @@ class RegistrationTests(unittest.TestCase):
         plugin_path = Path(__file__).with_name("plugin.json")
         plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(plugin["invocation_file"], "main.py")
+        self.assertEqual(plugin["entrypoint"]["executable"], "python3")
+        self.assertEqual(plugin["entrypoint"]["args"], ["main.py"])
+        self.assertEqual(plugin["plugin_contract_ver"], 2)
         self.assertEqual(plugin["cron_time"], "0 8 * * *")
         self.assertTrue(plugin["adhoc"])
         self.assertTrue(plugin["cron"])

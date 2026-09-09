@@ -163,7 +163,9 @@ class DigitalOceanClientTests(unittest.TestCase):
         plugin_path = Path(__file__).with_name("plugin.json")
         plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(plugin["invocation_file"], "digitalocean_vms.py")
+        self.assertEqual(plugin["entrypoint"]["executable"], "python3")
+        self.assertEqual(plugin["entrypoint"]["args"], ["digitalocean_vms.py"])
+        self.assertEqual(plugin["plugin_contract_ver"], 2)
         self.assertEqual(plugin["min_allowed_role"], "owner")
         self.assertTrue(plugin["adhoc"])
         self.assertTrue(plugin["user_input"])

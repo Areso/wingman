@@ -2,8 +2,10 @@
     "id": "manage_digitalocean_vms",
     "name": "Manage DigitalOcean VMs",
     "enabled": true,
-    "invocation_with": "python3",
-    "invocation_file": "digitalocean_vms.py",
+    "entrypoint": {
+        "executable": "python3",
+        "args": ["digitalocean_vms.py"]
+    },
     "invocation_type": "sync",
     "invocation_timeout_s": 45,
     "options": [
@@ -26,5 +28,5 @@
     "user_input_label": "Delete VM",
     "user_input_prompt": "Enter the exact VM name to delete (for example, wing-a1b2):",
     "user_input_prefix": "delete ",
-    "plugin_contract_ver": 1
+    "plugin_contract_ver": 2
 }

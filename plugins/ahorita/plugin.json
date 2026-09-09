@@ -2,8 +2,10 @@
     "id": "manage_ahorita_tasks",
     "name": "Manage Ahorita tasks",
     "enabled": true,
-    "invocation_with": "python3",
-    "invocation_file": "ahorita.py",
+    "entrypoint": {
+        "executable": "python3",
+        "args": ["ahorita.py"]
+    },
     "invocation_type": "sync",
     "invocation_timeout_s": 30,
     "options": [
@@ -17,5 +19,5 @@
     "cron": false,
     "min_allowed_role": "owner",
     "user_input": true,
-    "plugin_contract_ver": 1
+    "plugin_contract_ver": 2
 }

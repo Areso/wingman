@@ -64,21 +64,25 @@ func (c *CommonConfig) Validate() error {
 	return nil
 }
 
+type EntryPoint struct {
+	Executable string   `json:"executable"`
+	Args       []string `json:"args"`
+}
+
 type Plugin struct {
 	CommonConfig
-	Name               string   `json:"name"`
-	InvocationWith     string   `json:"invocation_with"`
-	InvocationFile     string   `json:"invocation_file"`
-	InvocationType     string   `json:"invocation_type"`
-	InvocationTimeoutS int32    `json:"invocation_timeout_s"`
-	Adhoc              bool     `json:"adhoc"`
-	Cron               bool     `json:"cron"`
-	CronTime           string   `json:"cron_time"`
-	MinAllowedRole     string   `json:"min_allowed_role"`
-	UserInput          bool     `json:"user_input"`
-	Params             []string `json:"params"`
-	Options            []string `json:"options"`
-	PluginContractVer  int      `json:"plugin_contract_ver"`
+	Name               string     `json:"name"`
+	EntryPoint         EntryPoint `json:"entrypoint"`
+	InvocationType     string     `json:"invocation_type"`
+	InvocationTimeoutS int32      `json:"invocation_timeout_s"`
+	Adhoc              bool       `json:"adhoc"`
+	Cron               bool       `json:"cron"`
+	CronTime           string     `json:"cron_time"`
+	MinAllowedRole     string     `json:"min_allowed_role"`
+	UserInput          bool       `json:"user_input"`
+	Params             []string   `json:"params"`
+	Options            []string   `json:"options"`
+	PluginContractVer  int        `json:"plugin_contract_ver"`
 }
 
 func (p *Plugin) Validate() error {
@@ -89,11 +93,11 @@ func (p *Plugin) Validate() error {
 	if strings.TrimSpace(p.Name) == "" {
 		return errors.New("field 'name' cannot be empty")
 	}
-	if strings.TrimSpace(p.InvocationWith) == "" {
-		return errors.New("field 'invocation_with' cannot be empty")
+	if strings.TrimSpace(p.EntryPoint.Executable) == "" {
+		return errors.New("field 'entrypoint.executable' cannot be empty")
 	}
-	if strings.TrimSpace(p.InvocationFile) == "" {
-		return errors.New("field 'invocation_file' cannot be empty")
+	if p.EntryPoint.Args == nil {
+		return errors.New("field 'entrypoint.args' cannot be null or missing")
 	}
 	invType := strings.TrimSpace(p.InvocationType)
 	if invType == "" {
@@ -452,13 +456,6 @@ func create_task(db *sql.DB, p Plugin, inv_with string, inv_id string, params an
 	return id, nil
 }
 
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
 func parseTaskArgs(paramsRaw sql.NullString) ([]string, error) {
 	if !paramsRaw.Valid || paramsRaw.String == "" {
 		return nil, nil
@@ -495,11 +492,16 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		return errWrap.Error(), -4, errWrap // Using -4 for malformed input data
 	}
 
-	// Build command string
-	fullCommand := fmt.Sprintf("%s %s", p.InvocationWith, p.InvocationFile)
-	for _, arg := range args {
-		fullCommand += " " + shellQuote(arg)
+	executable := p.EntryPoint.Executable
+	if !filepath.IsAbs(executable) && strings.ContainsRune(executable, os.PathSeparator) {
+		executable, err = filepath.Abs(filepath.Join(p.Dir, executable))
+		if err != nil {
+			errWrap := fmt.Errorf("error resolving plugin executable: %w", err)
+			return errWrap.Error(), -3, errWrap
+		}
 	}
+	commandArgs := append([]string(nil), p.EntryPoint.Args...)
+	commandArgs = append(commandArgs, args...)
 
 	if p.InvocationType == string(Sync) {
 		// Manage timeout
@@ -510,21 +512,21 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, "bash", "-c", fullCommand)
+		cmd := exec.CommandContext(ctx, executable, commandArgs...)
 		cmd.Dir = p.Dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
 		if verbosity >= 3 {
-			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, fullCommand)
+			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, cmd.String())
 		}
 
 		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
 		// shutdown must let running tasks finish, not kill them
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		// Because of Setpgid, the deadline has to kill the whole group by hand,
-		// otherwise only bash dies and it's childrent (python3, nc, ...) linger
+		// otherwise only the plugin process dies and its children linger.
 		cmd.Cancel = func() error {
 			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
@@ -557,10 +559,7 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		output := stdout.String() + "\n" + stderr.String()
 		return output, rc, runErr
 	} else {
-		// FIX 1: Use background context without a zero-duration timeout (which kills the process immediately)
-		// FIX 2: Do NOT pass ctx to exec.CommandContext if you want a detached background process,
-		// or use context.Background() directly so it outlives the function execution.
-		cmd := exec.Command("bash", "-c", fullCommand)
+		cmd := exec.Command(executable, commandArgs...)
 		cmd.Dir = p.Dir
 
 		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
@@ -568,7 +567,7 @@ func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		if verbosity >= 3 {
-			log.Printf("invoking background task %d (plugin %s): %s", id, p.ID, fullCommand)
+			log.Printf("invoking background task %d (plugin %s): %s", id, p.ID, cmd.String())
 		}
 
 		runErr := cmd.Start()
@@ -1069,8 +1068,8 @@ func validateAppconfig(meta toml.MetaData) error {
 	if !meta.IsDefined("minimum_plugin_contract_version") {
 		return fmt.Errorf("field 'minimum_plugin_contract_version' is missing from config.toml")
 	}
-	if config.MinimumPluginContractVersion < 1 {
-		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 1 (got %d)", config.MinimumPluginContractVersion)
+	if config.MinimumPluginContractVersion < 2 {
+		return fmt.Errorf("field 'minimum_plugin_contract_version' must be at least 2 (got %d)", config.MinimumPluginContractVersion)
 	}
 	return nil
 }
