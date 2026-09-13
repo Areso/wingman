@@ -1,0 +1,21 @@
+{
+  "id": "youtube_downloader",
+  "name": "Download YouTube video or audio",
+  "enabled": true,
+  "entrypoint": {
+    "executable": ".venv/bin/python",
+    "args": ["youtube_downloader.py"]
+  },
+  "invocation_type": "sync",
+  "invocation_timeout_s": 1800,
+  "options": [],
+  "adhoc": true,
+  "cron": false,
+  "cron_time": "",
+  "min_allowed_role": "user",
+  "user_input": true,
+  "user_input_label": "YouTube URL",
+  "user_input_prompt": "Send a YouTube link. Use just the URL for video, or prefix it with 'video ' or 'audio '. Only download media you own or are authorized to save.",
+  "user_input_prefix": "",
+  "plugin_contract_ver": 2
+}

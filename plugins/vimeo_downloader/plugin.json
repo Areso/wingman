@@ -1,0 +1,21 @@
+{
+  "id": "vimeo_downloader",
+  "name": "Download Vimeo video or audio",
+  "enabled": true,
+  "entrypoint": {
+    "executable": ".venv/bin/python",
+    "args": ["vimeo_downloader.py"]
+  },
+  "invocation_type": "sync",
+  "invocation_timeout_s": 1800,
+  "options": [],
+  "adhoc": true,
+  "cron": false,
+  "cron_time": "",
+  "min_allowed_role": "user",
+  "user_input": true,
+  "user_input_label": "Vimeo URL",
+  "user_input_prompt": "Send a Vimeo link. Use just the URL for video, or prefix it with 'video ' or 'audio '. Only download media you own or are authorized to save.",
+  "user_input_prefix": "",
+  "plugin_contract_ver": 2
+}
