@@ -1,0 +1,11 @@
+# private plugins
+# bazaraki allows to scrape the site which is not operational safe for the site
+# also bazaraki owners explicitly disallow scrapping
+bazaraki
+# the same goes to the podcaster
+podcaster
+# given the nature of a2a plugin, local implemention of it is just dangerous
+a2a
+# mcp_bridge requires more work and probably a2a plugin
+mcp_bridge
+
