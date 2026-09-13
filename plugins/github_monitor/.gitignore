@@ -1,0 +1,9 @@
+github_monitor.db
+github_monitor.db-shm
+github_monitor.db-wal
+github_monitor.log
+github_monitor.log.*
+github_monitor_missing_permissions.log
+github_monitor_missing_permissions.log.*
+__pycache__/
+token_details.txt

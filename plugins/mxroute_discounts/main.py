@@ -9,8 +9,8 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.toml")
-MONEY_PATTERN = re.compile(r"\$\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)")
-PROMOTION_KEYWORDS = ("sale", "special", "offer", "discount")
+MONEY_PATTERN       = re.compile(r"\$\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)")
+PROMOTION_KEYWORDS  = ("sale", "special", "offer", "discount")
 
 
 class DiscountCheckError(Exception):
