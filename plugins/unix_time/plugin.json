@@ -1,0 +1,20 @@
+{
+  "id": "convert_unix_time",
+  "name": "Convert Unix time and UTC",
+  "enabled": true,
+  "entrypoint": {
+    "executable": "python3",
+    "args": ["main.py"]
+  },
+  "invocation_type": "sync",
+  "invocation_timeout_s": 10,
+  "options": [
+    "to-utc 0",
+    "to-unix 1970-01-01T00:00:00Z"
+  ],
+  "adhoc": true,
+  "cron": false,
+  "min_allowed_role": "guest",
+  "user_input": true,
+  "plugin_contract_ver": 2
+}
