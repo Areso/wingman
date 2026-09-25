@@ -16,6 +16,7 @@ from pathlib import Path
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.toml")
+MAX_REQUEST_ATTEMPTS = 3
 SECURITY_TYPES = {
     "dependabot": "Dependabot",
     "code_scanning": "Code scanning",
@@ -28,11 +29,12 @@ class MonitorError(Exception):
 
 
 class GitHubError(MonitorError):
-    def __init__(self, message, status=None, headers=None, resource=None):
+    def __init__(self, message, status=None, headers=None, resource=None, retryable=False):
         super().__init__(message)
         self.status = status
         self.headers = headers or {}
         self.resource = resource
+        self.retryable = retryable
 
 
 class GitHubClient:
@@ -176,6 +178,29 @@ class GitHubClient:
             )
 
     def request(self, path, params=None, return_headers=False):
+        # All requests are GETs. Retry the failed page, not the entire snapshot.
+        for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+            try:
+                return self._request_once(path, params, return_headers)
+            except GitHubError as error:
+                if not error.retryable:
+                    raise
+                if attempt == MAX_REQUEST_ATTEMPTS:
+                    raise GitHubError(
+                        f"{error} (after {attempt} attempts)", resource=error.resource
+                    ) from error
+                delay = 2 ** (attempt - 1)
+                if self.logger:
+                    self.logger.warning(
+                        "Transient request failure on attempt %d/%d: %s; retrying in %ss",
+                        attempt,
+                        MAX_REQUEST_ATTEMPTS,
+                        error,
+                        delay,
+                    )
+                time.sleep(delay)
+
+    def _request_once(self, path, params=None, return_headers=False):
         if params:
             separator = "&" if "?" in path else "?"
             path += separator + urllib.parse.urlencode(params)
@@ -218,9 +243,14 @@ class GitHubClient:
                 headers=response_headers,
                 resource=resource,
             ) from error
-        except urllib.error.URLError as error:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
             response_status = "network_error"
-            raise GitHubError(f"Could not reach GitHub API: {error.reason}") from error
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            raise GitHubError(
+                f"Could not reach GitHub API resource {resource}: {reason}",
+                resource=resource,
+                retryable=isinstance(reason, (TimeoutError, ConnectionError)),
+            ) from error
         finally:
             self.record_request(
                 resource,
