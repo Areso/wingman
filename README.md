@@ -43,6 +43,41 @@ cron    ─┘
 3) if no default channel configured: sentinel "devnull" -> mark sent and drop, so the task isn't re-selected forever
 
 
+## Source layout
+
+```text
+cmd/wingman/             Core source and tests
+  main.go
+  main_test.go
+  execution.go
+  execution_test.go
+channels/               Interaction channels
+plugins/                Automation plugins
+docs/                   Development documentation
+go.mod, go.sum          Go module and dependencies
+```
+
+## Build and run the Core
+
+Run these commands from the repository root:
+
+```sh
+./build.sh
+go build -o wingman ./cmd/wingman
+./wingman
+```
+
+`build.sh` runs formatting checks, tests, static checks, and builds all Go packages.
+To run the Core directly during development:
+
+```sh
+go run ./cmd/wingman
+```
+
+The Core uses its working directory to locate `config.toml`, `plugins/`,
+`channels/`, and `wingman.db`, so launch it from the repository root.
+See [Testing Wingman](docs/TESTING.md) for focused test commands.
+
 ## Installation notes
 0. Setup secrets, preferably
 ```

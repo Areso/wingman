@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -33,13 +32,6 @@ const (
 )
 
 const devnull string = "devnull"
-
-type executionMode string
-
-const (
-	Async executionMode = "async"
-	Sync  executionMode = "sync"
-)
 
 type Config interface {
 	GetCommon() *CommonConfig
@@ -477,115 +469,28 @@ func parseTaskArgs(paramsRaw sql.NullString) ([]string, error) {
 	return nil, nil
 }
 
-// Helper to isolate execution logic and guarantee we return valid DB values
-func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql.NullString, id int64) (string, int, error) {
+// executePluginTask prepares a queued task and always returns valid DB values.
+func executePluginTask(plugins map[string]Plugin, pluginID string, paramsRaw sql.NullString, id int64) ExecutionResult {
 	// Check if plugin exists
 	p, ok := plugins[pluginID]
 	if !ok {
 		err := fmt.Errorf("plugin %s not found", pluginID)
-		return err.Error(), -3, err // Using -3 for configuration errors
+		return ExecutionResult{Output: err.Error(), RC: -3, Err: err}
 	}
 
 	args, err := parseTaskArgs(paramsRaw)
 	if err != nil {
 		errWrap := fmt.Errorf("error unmarshalling params: %w", err)
-		return errWrap.Error(), -4, errWrap // Using -4 for malformed input data
+		return ExecutionResult{Output: errWrap.Error(), RC: -4, Err: errWrap}
 	}
 
-	executable := p.EntryPoint.Executable
-	if !filepath.IsAbs(executable) && strings.ContainsRune(executable, os.PathSeparator) {
-		executable, err = filepath.Abs(filepath.Join(p.Dir, executable))
-		if err != nil {
-			errWrap := fmt.Errorf("error resolving plugin executable: %w", err)
-			return errWrap.Error(), -3, errWrap
-		}
+	invocation, err := prepareInvocation(p, args)
+	if err != nil {
+		return ExecutionResult{Output: err.Error(), RC: -3, Err: err}
 	}
-	commandArgs := append([]string(nil), p.EntryPoint.Args...)
-	commandArgs = append(commandArgs, args...)
 
-	if p.InvocationType == string(Sync) {
-		// Manage timeout
-		timeout := time.Duration(p.InvocationTimeoutS) * time.Second
-		if timeout == 0 {
-			timeout = 30 * time.Second
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		cmd := exec.CommandContext(ctx, executable, commandArgs...)
-		cmd.Dir = p.Dir
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		if verbosity >= 3 {
-			log.Printf("invoking queued task %d (plugin %s): %s", id, p.ID, cmd.String())
-		}
-
-		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
-		// shutdown must let running tasks finish, not kill them
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		// Because of Setpgid, the deadline has to kill the whole group by hand,
-		// otherwise only the plugin process dies and its children linger.
-		cmd.Cancel = func() error {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		cmd.WaitDelay = 5 * time.Second
-
-		runErr := cmd.Run()
-		rc := 0
-
-		if runErr != nil {
-			// Check if the error was caused by a timeout
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				log.Printf("Command timed out after %v", timeout)
-				rc = -1 // RC for timeout (for now)
-			} else {
-				var exitErr *exec.ExitError
-				if errors.As(runErr, &exitErr) {
-					// The command finished with a non-zero exit code
-					rc = exitErr.ExitCode()
-					log.Printf("Command failed with RC: %d", rc)
-				} else {
-					// The command failed to start, or another issue occurred
-					rc = -2 // RC for failed to start (for now)
-					log.Printf("Command failed to execute: %v", runErr)
-				}
-			}
-		} else {
-			log.Println("Command finished successfully")
-		}
-
-		output := stdout.String() + "\n" + stderr.String()
-		return output, rc, runErr
-	} else {
-		cmd := exec.Command(executable, commandArgs...)
-		cmd.Dir = p.Dir
-
-		// Own process group, so a Ctrl-C aimed at Core's group doesn't reach the plugin:
-		// shutdown must let running tasks finish, not kill them
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-		if verbosity >= 3 {
-			log.Printf("invoking background task %d (plugin %s): %s", id, p.ID, cmd.String())
-		}
-
-		runErr := cmd.Start()
-		if runErr != nil {
-			log.Printf("Command failed to start: %v", runErr)
-			return "", -2, runErr
-		}
-
-		log.Println("Command started in the background successfully")
-
-		go func() {
-			if err := cmd.Wait(); err != nil {
-				log.Printf("background task %d exited with error: %v", id, err)
-			}
-		}()
-
-		return "Task started in background", 0, nil
-	}
+	logger := log.New(log.Writer(), fmt.Sprintf("%stask %d (plugin %s): ", log.Prefix(), id, p.ID), log.Flags())
+	return executeNative(invocation, logger)
 }
 
 func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plugin) {
@@ -662,7 +567,7 @@ func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plug
 			defer func() { <-sem }()
 
 			// 1. Execute the task logic and capture the outcome
-			result, rc, runErr := executePluginTask(plugins, pluginID, paramsRaw, id)
+			result := executePluginTask(plugins, pluginID, paramsRaw, id)
 
 			// 2. ALWAYS update the database, even if the plugin wasn't found or JSON was corrupted
 			finishTime := time.Now().UTC().Unix()
@@ -673,13 +578,13 @@ func processQueuedTasks(ctx context.Context, db *sql.DB, plugins map[string]Plug
 					rc     = ? 
 				WHERE  id = ?`
 
-			_, err = db.Exec(query2, finishTime, result, rc, id)
+			_, err = db.Exec(query2, finishTime, result.Output, result.RC, id)
 			if err != nil {
 				log.Printf("error updating finished_at for task %d: %v", id, err)
 			}
 
-			if runErr != nil {
-				log.Printf("task %d failed/aborted: %v", id, runErr)
+			if result.Err != nil {
+				log.Printf("task %d failed/aborted: %v", id, result.Err)
 			}
 		}(id, pluginID, paramsRaw)
 	}

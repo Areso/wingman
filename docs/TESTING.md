@@ -34,9 +34,9 @@ go test -v ./...
 To run one area or one test:
 
 ```sh
-go test -v .
+go test -v ./cmd/wingman
 go test -v ./channels/telegram
-go test -v . -run TestDatabaseTaskLifecycle
+go test -v ./cmd/wingman -run TestDatabaseTaskLifecycle
 go test -v ./channels/telegram -run TestHandleSendMessage
 ```
 
@@ -48,7 +48,8 @@ go test -race ./...
 
 ## How the tests are organized
 
-- `main_test.go` tests the Core.
+- `cmd/wingman/main_test.go` tests the Core.
+- `cmd/wingman/execution_test.go` tests invocation preparation and process execution.
 - `channels/telegram/main_test.go` tests the Telegram channel.
 - A function named `TestSomething` is discovered automatically by `go test`.
 - `t.Run(...)` creates named subtests, so a failed input reports exactly which

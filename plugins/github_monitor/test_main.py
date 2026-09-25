@@ -1,10 +1,16 @@
+import io
 import json
+import logging
+import ssl
 import sqlite3
 import threading
 import tempfile
 import unittest
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest import mock
 
 from main import (
     GitHubClient,
@@ -233,6 +239,131 @@ class GitHubClientTests(unittest.TestCase):
         self.assertEqual(items[-1]["id"], 101)
         self.assertEqual(sum(path.startswith("/paged") for path in GitHubHandler.paths), 2)
         self.assertEqual(client.request_count, 2)
+
+    def test_transient_connection_errors_retry_the_same_request(self):
+        failures = (
+            urllib.error.URLError(TimeoutError("timed out")),
+            TimeoutError("timed out"),
+            ConnectionResetError("connection reset"),
+            urllib.error.URLError(ConnectionResetError("connection reset")),
+        )
+        for failure in failures:
+            with self.subTest(failure=repr(failure)):
+                client = GitHubClient(
+                    f"http://127.0.0.1:{self.server.server_port}", "test-token", timeout=7
+                )
+                with mock.patch(
+                    "main.urllib.request.urlopen",
+                    wraps=urllib.request.urlopen,
+                    side_effect=[failure, mock.DEFAULT],
+                ) as urlopen, mock.patch("main.time.sleep") as sleep:
+                    profile = client.request("/user", {"detail": 1})
+
+                self.assertEqual(profile["login"], "octo")
+                self.assertEqual(client.request_count, 2)
+                self.assertEqual(client.request_stats["profile"][0], 2)
+                self.assertEqual(urlopen.call_count, 2)
+                for call in urlopen.call_args_list:
+                    self.assertTrue(call.args[0].full_url.endswith("/user?detail=1"))
+                    self.assertEqual(call.kwargs["timeout"], 7)
+                sleep.assert_called_once_with(1)
+
+    def test_timeout_reading_response_body_is_retried(self):
+        client = GitHubClient(f"http://127.0.0.1:{self.server.server_port}", "test-token")
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.side_effect = TimeoutError("The read operation timed out")
+        with mock.patch(
+            "main.urllib.request.urlopen",
+            wraps=urllib.request.urlopen,
+            side_effect=[response, mock.DEFAULT],
+        ), mock.patch("main.time.sleep") as sleep:
+            profile = client.request("/user")
+
+        self.assertEqual(profile["login"], "octo")
+        self.assertEqual(client.request_count, 2)
+        response.__exit__.assert_called_once()
+        sleep.assert_called_once_with(1)
+
+    def test_pagination_retries_only_the_failed_page(self):
+        client = GitHubClient(f"http://127.0.0.1:{self.server.server_port}", "test-token")
+        with mock.patch(
+            "main.urllib.request.urlopen",
+            wraps=urllib.request.urlopen,
+            side_effect=[
+                mock.DEFAULT,
+                urllib.error.URLError(TimeoutError("timed out")),
+                mock.DEFAULT,
+            ],
+        ), mock.patch("main.time.sleep"):
+            items = client.paginate("/paged")
+
+        self.assertEqual([item["id"] for item in items], list(range(1, 102)))
+        self.assertEqual(client.request_count, 3)
+        self.assertEqual(GitHubHandler.paths, ["/paged?per_page=100", "/paged?cursor=next"])
+
+    def test_timeouts_stop_after_three_attempts_and_identify_resource(self):
+        logger = logging.getLogger("github_monitor.test.retries")
+        client = GitHubClient("https://api.github.test", "test-token", logger=logger)
+        with mock.patch(
+            "main.urllib.request.urlopen",
+            side_effect=urllib.error.URLError(TimeoutError("timed out")),
+        ) as urlopen, mock.patch("main.time.sleep") as sleep, self.assertLogs(
+            logger, level="INFO"
+        ) as captured:
+            with self.assertRaises(GitHubError) as raised:
+                client.request("/user/repos", {"page": 3})
+
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [mock.call(1), mock.call(2)])
+        self.assertEqual(client.request_count, 3)
+        self.assertEqual(client.request_stats["repositories"][0], 3)
+        self.assertEqual(raised.exception.resource, "/user/repos?page=3")
+        self.assertIn("timed out", str(raised.exception))
+        self.assertIn("after 3 attempts", str(raised.exception))
+        log_output = "\n".join(captured.output)
+        self.assertIn("retrying in 1s", log_output)
+        self.assertIn("retrying in 2s", log_output)
+        self.assertIn("resource=/user/repos?page=3", log_output)
+        self.assertIn("last_status=network_error", log_output)
+        self.assertNotIn("test-token", log_output + str(raised.exception))
+
+    def test_http_errors_are_not_retried(self):
+        for status in (401, 403, 404, 429):
+            with self.subTest(status=status):
+                client = GitHubClient("https://api.github.test", "test-token")
+                failure = urllib.error.HTTPError(
+                    "https://api.github.test/user",
+                    status,
+                    "request rejected",
+                    {"X-RateLimit-Remaining": "0"},
+                    io.BytesIO(b'{"message": "request rejected"}'),
+                )
+                self.addCleanup(failure.close)
+                with mock.patch(
+                    "main.urllib.request.urlopen", side_effect=failure
+                ) as urlopen, mock.patch("main.time.sleep") as sleep:
+                    with self.assertRaises(GitHubError) as raised:
+                        client.request("/user")
+
+                self.assertEqual(raised.exception.status, status)
+                self.assertEqual(raised.exception.headers["X-RateLimit-Remaining"], "0")
+                self.assertEqual(raised.exception.resource, "/user")
+                self.assertEqual(client.request_count, 1)
+                urlopen.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_certificate_errors_are_not_retried(self):
+        client = GitHubClient("https://api.github.test", "test-token")
+        failure = urllib.error.URLError(ssl.SSLCertVerificationError("invalid certificate"))
+        with mock.patch(
+            "main.urllib.request.urlopen", side_effect=failure
+        ) as urlopen, mock.patch("main.time.sleep") as sleep:
+            with self.assertRaisesRegex(GitHubError, "resource /user.*invalid certificate"):
+                client.request("/user")
+
+        urlopen.assert_called_once()
+        sleep.assert_not_called()
 
     def test_rate_limit_is_not_treated_as_unavailable_security(self):
         client = GitHubClient(f"http://127.0.0.1:{self.server.server_port}", "test-token")

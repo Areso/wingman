@@ -38,8 +38,19 @@ private repository names and links.
 
 ## Manual run
 
+From `plugins/github_monitor`:
+
 ```sh
 python3 main.py
+```
+
+This plugin uses only Python's standard library; no virtual environment or
+additional packages are required. If you want to use the repository's existing
+environment, its activation script is `../../.venv/bin/activate` from this
+directory. You can also use its interpreter directly:
+
+```sh
+../../.venv/bin/python3 main.py
 ```
 
 The local `github_monitor.db` is ignored by Git. Lists and list differences are
@@ -61,6 +72,7 @@ The log includes:
 - query counts and timing grouped by endpoint category
 - the last observed GitHub rate-limit balance
 - failed resource paths and stack traces
+- connection retry attempts and backoff delays
 
 Follow a run with:
 
@@ -87,6 +99,25 @@ The cache lasts for one run only, so a later run tests the first repository agai
 and automatically notices when token permissions have been changed. Feature-level
 errors such as `code scanning is not enabled` are not cached because availability
 can differ between repositories.
+
+## Connection timeouts
+
+`timeout_seconds` in `config.toml` controls the HTTP socket timeout (30 seconds by
+default). A single timeout previously aborted the whole scan, even after hundreds
+of successful requests. Connection timeouts, read timeouts, and connection resets
+now retry the failed request up to three total attempts, waiting 1 second and then
+2 seconds between attempts. The query count in the log includes retries.
+
+HTTP errors such as authentication failures and rate limits are not retried.
+If connection retries are exhausted, the error names the failed API resource and
+the incomplete scan is not saved; the previous successful snapshot remains the
+comparison baseline.
+
+To check current connectivity independently of the plugin and token:
+
+```sh
+curl --connect-timeout 10 --max-time 20 -I https://api.github.com
+```
 
 ## The permissions needed for fine-graining token
 all repos

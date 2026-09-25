@@ -235,7 +235,8 @@ func TestLoadConfigs(t *testing.T) {
 }
 
 func TestPluginManifestsUseContractV2Entrypoints(t *testing.T) {
-	manifestPaths, err := filepath.Glob("plugins/*/plugin*.json")
+	// Go tests run from cmd/wingman; plugin manifests live at the repository root.
+	manifestPaths, err := filepath.Glob(filepath.Join("..", "..", "plugins", "*", "plugin*.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,17 +362,17 @@ func TestExecutePluginTask(t *testing.T) {
 	}
 	plugins := map[string]Plugin{plugin.ID: plugin}
 
-	result, rc, err := executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `{"option":"two words"}`}, 1)
-	if err != nil || rc != 0 || !strings.Contains(result, "manifest argument|two words") {
-		t.Fatalf("executePluginTask() = %q, %d, %v", result, rc, err)
+	result := executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `{"option":"two words"}`}, 1)
+	if result.Err != nil || result.RC != 0 || !strings.Contains(result.Output, "manifest argument|two words") {
+		t.Fatalf("executePluginTask() = %+v", result)
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("printf '%s|%s|%s|%s' \"$1\" \"$2\" \"$3\" \"$4\""), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	result, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `["two words","-o","output; touch unsafe"]`}, 2)
-	if err != nil || rc != 0 || !strings.Contains(result, "manifest argument|two words|-o|output; touch unsafe") {
-		t.Fatalf("executePluginTask() with argument list = %q, %d, %v", result, rc, err)
+	result = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: `["two words","-o","output; touch unsafe"]`}, 2)
+	if result.Err != nil || result.RC != 0 || !strings.Contains(result.Output, "manifest argument|two words|-o|output; touch unsafe") {
+		t.Fatalf("executePluginTask() with argument list = %+v", result)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "unsafe")); !os.IsNotExist(err) {
 		t.Fatal("shell metacharacters in arguments must not be executed")
@@ -389,19 +390,19 @@ func TestExecutePluginTask(t *testing.T) {
 	relative.Dir = dir
 	relative.EntryPoint = EntryPoint{Executable: ".venv/bin/plugin", Args: []string{"works"}}
 	plugins[relative.ID] = relative
-	result, rc, err = executePluginTask(plugins, relative.ID, sql.NullString{}, 3)
-	if err != nil || rc != 0 || !strings.Contains(result, "relative=works") {
-		t.Fatalf("executePluginTask() with relative executable = %q, %d, %v", result, rc, err)
+	result = executePluginTask(plugins, relative.ID, sql.NullString{}, 3)
+	if result.Err != nil || result.RC != 0 || !strings.Contains(result.Output, "relative=works") {
+		t.Fatalf("executePluginTask() with relative executable = %+v", result)
 	}
 
-	_, rc, err = executePluginTask(plugins, "missing", sql.NullString{}, 4)
-	if err == nil || rc != -3 {
-		t.Fatalf("missing plugin rc/error = %d, %v; want -3 and an error", rc, err)
+	result = executePluginTask(plugins, "missing", sql.NullString{}, 4)
+	if result.Err == nil || result.RC != -3 || result.Output != result.Err.Error() {
+		t.Fatalf("missing plugin result = %+v; want -3 and an error in the output", result)
 	}
 
-	_, rc, err = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 5)
-	if err == nil || rc != -4 {
-		t.Fatalf("invalid params rc/error = %d, %v; want -4 and an error", rc, err)
+	result = executePluginTask(plugins, plugin.ID, sql.NullString{Valid: true, String: "{"}, 5)
+	if result.Err == nil || result.RC != -4 || result.Output != result.Err.Error() {
+		t.Fatalf("invalid params result = %+v; want -4 and an error in the output", result)
 	}
 }
 
@@ -425,14 +426,14 @@ func TestExecuteAsyncPluginTask(t *testing.T) {
 	}
 	plugins := map[string]Plugin{plugin.ID: plugin}
 
-	result, rc, err := executePluginTask(
+	result := executePluginTask(
 		plugins,
 		plugin.ID,
 		sql.NullString{Valid: true, String: `["runtime; touch unsafe"]`},
 		1,
 	)
-	if err != nil || rc != 0 || result != "Task started in background" {
-		t.Fatalf("executePluginTask() = %q, %d, %v", result, rc, err)
+	if result.Err != nil || result.RC != 0 || result.Output != "Task started in background" {
+		t.Fatalf("executePluginTask() = %+v", result)
 	}
 
 	deadline := time.Now().Add(time.Second)
