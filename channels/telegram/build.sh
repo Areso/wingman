@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-# This package-only script mirrors the repository build sequence.
+# Keep the sequence explicit: formatting, tests, static checks, then build.
 unformatted=$(gofmt -l .)
 if [ -n "$unformatted" ]; then
 	printf 'The following Go files need formatting:\n%s\n' "$unformatted"
 	exit 1
 fi
 
-go test .
+go test -race .
 go vet .
 go build .
