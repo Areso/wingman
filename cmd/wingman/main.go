@@ -329,7 +329,7 @@ func initDB(path string) (*sql.DB, error) {
 			result TEXT,
 			rc INTEGER,
 			result_sent_at INTEGER,
-			send_retries INTEGER
+			send_retries INTEGER NOT NULL DEFAULT 0
 		)
 	`)
 	if err != nil {
